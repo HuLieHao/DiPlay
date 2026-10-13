@@ -1,6 +1,6 @@
 # BuickPlay 0.2.18-buick.1 — 2026-10-13
 
-基于上游 DiPlay 0.2.18 的非官方凯越个人定制版本，分支为 `kaiyue`。尚未合入上游 0.2.19。
+基于上游 DiPlay 0.2.18 的后装安卓车机个人定制版本，分支为 `kaiyue`。尚未合入上游 0.2.19。当前车辆使用第三方后装车机，与凯越原装车机无关；BuickPlay 和 `buick.1` 表示个人别克主题，不代表官方产品或仅限别克车型。
 
 ## 改动
 
@@ -36,7 +36,7 @@ DIPLAY_AUTH_ASSETS_DIR=/path/to/local-runtime-assets ./gradlew :mobile:assembleS
 使用 GitHub Releases 的附件，不将 APK 添加到源码仓库：
 
 1. 仓库首页进入 Releases，选择 Draft a new release。
-2. 新标签使用 `v0.2.18-buick.1`，Target 选择 kaiyue。
+2. 选择已经推送的标签 `v0.2.18-buick.1`，该标签对应 APK 构建源码；不要重新创建或移动标签。
 3. 填写改动、源码对应提交、构建方式、验证结果和认证材料说明。
 4. 拖入已确认可以分发的 APK，勾选预发布版本，再发布。
 
@@ -44,4 +44,6 @@ DIPLAY_AUTH_ASSETS_DIR=/path/to/local-runtime-assets ./gradlew :mobile:assembleS
 
 ## 验证范围
 
-已在 Android 11 调试手机上验证无线 CarPlay、车辆按钮及系统通知名称。凯越 Android 8.1 车机上的开机/ACC 恢复、热点自动开启、音频和倒车恢复仍待实车验证。独立底部叠加时钟尚未实现。
+已在 Android 11 调试手机上验证无线 CarPlay、车辆按钮及系统通知名称。完整检查覆盖 2503 个测试，0 失败、1 跳过，lint 和 APK 构建通过。
+
+目标设备为 FFKJ FF-5000 后装车机，AC8227L 四核、32 位 ARM、约 1GB RAM / 16GB 存储、1024×600。系统显示版本字段为 10，实际基础为 Android 8.1 / API 27，满足应用最低 API 25 要求。当前已确认 2.4GHz 联网，准确无线芯片型号及物理 5GHz 能力未核实。该车机上的 BuickPlay 连接、开机/ACC 恢复、热点自动开启、音频和倒车恢复仍待实车验证。独立底部叠加时钟尚未实现。
