@@ -1,5 +1,7 @@
 # DiPlay
 
+> **BuickPlay fork — `kaiyue` branch:** personal, unofficial Buick Kaiyue customization based on DiPlay 0.2.18; version `0.2.18-buick.1` (2026-10-13). Changes cover application/device/notification names, the car-button label and image, and the non-BYD car-hotspot settings entry. See [fork release notes](docs/RELEASE-NOTES-0.2.18-buick.1.md). Original credits and licenses below remain applicable. No affiliation with or endorsement by Buick, General Motors, Apple or the upstream authors is implied.
+
 **CarPlay for compatible BYD Android head units.** Wired and wireless, with the familiar DiAuto interface. Independent app: `com.shihab.diplay`.
 
 > **BYD support scope:** These projects focus on BYD cars. They may work on other brands, but other brands are unsupported and there are no plans to add support or fix brand-specific incompatibilities.
