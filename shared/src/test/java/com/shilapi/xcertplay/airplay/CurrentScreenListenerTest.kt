@@ -20,6 +20,46 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class) // CarPlayMediaEngine.onScreen logs through android.util.Log.
 @Config(sdk = [29], manifest = Config.NONE)
 class CurrentScreenListenerTest {
+    @Test fun auxiliaryScreenCannotReportThePrimaryPictureAsRendered() {
+        val handlers = mutableMapOf<Int, (String) -> Unit>()
+        val engine = CarPlayMediaEngine(object : MediaSink {
+            override fun setVideoDiagnosticHandler(type: Int, handler: (String) -> Unit) { handlers[type] = handler }
+        })
+        var rendered = 0
+        val session = testSession(object : AirPlaySessionListener {
+            override fun onVideoFrameRendered(session: AirPlaySession) { rendered++ }
+        })
+        try {
+            withSharedSecret(session)
+            assertNotNull(engine.onScreen(session, 110, mapOf("streamConnectionID" to 1L)))
+            assertNotNull(engine.onScreen(session, 111, mapOf("streamConnectionID" to 2L)))
+            handlers[111]!!("first frame rendered")
+            assertEquals("Auxiliary video must not cancel primary startup protection", 0, rendered)
+            handlers[110]!!("first frame rendered")
+            assertEquals(1, rendered)
+        } finally { engine.onSessionClosed(session); session.close() }
+    }
+
+    @Test fun replacedPrimaryStreamsLateDiagnosticCannotReportAFirstPicture() {
+        var handler: ((String) -> Unit)? = null
+        val engine = CarPlayMediaEngine(object : MediaSink {
+            override fun setVideoDiagnosticHandler(type: Int, next: (String) -> Unit) { handler = next }
+        })
+        var rendered = 0
+        val session = testSession(object : AirPlaySessionListener {
+            override fun onVideoFrameRendered(session: AirPlaySession) { rendered++ }
+        })
+        try {
+            withSharedSecret(session)
+            assertNotNull(engine.onScreen(session, 110, mapOf("streamConnectionID" to 1L)))
+            val retired = handler!!
+            assertNotNull(engine.onScreen(session, 110, mapOf("streamConnectionID" to 2L)))
+            retired("first frame rendered")
+            assertEquals(0, rendered)
+            handler!!("first frame rendered")
+            assertEquals(1, rendered)
+        } finally { engine.onSessionClosed(session); session.close() }
+    }
     private sealed class Event {
         data class Codec(val type: Int, val codec: VideoCodec) : Event()
         data class CodecData(val type: Int, val data: List<Byte>) : Event()
@@ -173,7 +213,7 @@ class CurrentScreenListenerTest {
         ScreenStream::class.java.getDeclaredField("listener").apply { isAccessible = true }
             .get(screen) as ScreenStream.Listener
 
-    private fun testSession(): AirPlaySession = AirPlaySession(
+    private fun testSession(listener: AirPlaySessionListener = object : AirPlaySessionListener {}): AirPlaySession = AirPlaySession(
         socket = Socket(),
         config = AirPlayConfig(
             deviceName = "test",
@@ -185,7 +225,7 @@ class CurrentScreenListenerTest {
         identity = AirPlayIdentity.generate(),
         pairings = PairingStore(),
         mfi = null,
-        listener = object : AirPlaySessionListener {},
+        listener = listener,
         media = object : AirPlayMediaHandler {},
     )
 }

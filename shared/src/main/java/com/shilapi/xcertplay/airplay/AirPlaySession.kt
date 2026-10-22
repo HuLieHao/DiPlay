@@ -90,6 +90,7 @@ class AirPlaySession(
         private set
     private var clusterStreamSetups = 0
     @Volatile private var mainScreenToken: Any? = null
+    @Volatile private var renderedMainScreenToken: Any? = null
 
     private val closed = AtomicBoolean(false)
     internal val isClosed: Boolean get() = closed.get()
@@ -142,7 +143,17 @@ class AirPlaySession(
     }
 
     internal fun videoFrameRendered() {
-        if (!closed.get()) listener.onVideoFrameRendered(this)
+        if (!closed.get()) {
+            // Media can render after SETUP, before RECORD makes this the active control session.
+            // Keep proof for this screen only; a new SETUP/TEARDOWN invalidates it by token identity.
+            mainScreenSessionToken()?.let { renderedMainScreenToken = it }
+            listener.onVideoFrameRendered(this)
+        }
+    }
+
+    internal fun hasRenderedCurrentMainScreen(): Boolean {
+        val token = mainScreenSessionToken()
+        return token != null && renderedMainScreenToken === token
     }
 
     internal fun logTrace(message: String) = trace(message)
@@ -157,6 +168,7 @@ class AirPlaySession(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         mainScreenToken = null
+        renderedMainScreenToken = null
         clearClusterContent()
         safeClose(socket)
         try {

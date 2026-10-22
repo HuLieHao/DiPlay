@@ -135,7 +135,10 @@ class CarPlayMediaEngine(
         Log.i(TAG, "airplay screen key connectionID=${unsignedPlistDecimal(stream["streamConnectionID"])}")
         val screen = ScreenStream(key, session::logDebug)
         sink.setVideoDiagnosticHandler(type) {
-            if (it == "first frame rendered") session.videoFrameRendered()
+            // Only the current primary stream proves usable projection. An auxiliary picture or
+            // a queued diagnostic from a retired decoder must not cancel startup protection.
+            if (it == "first frame rendered" && type == STREAM_TYPE_MAIN_SCREEN &&
+                streams[streamKey] === screen) session.videoFrameRendered()
             session.logDebug("Video: $it")
         }
         sink.setVideoRecoveryHandler(type) {

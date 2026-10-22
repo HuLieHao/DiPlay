@@ -64,4 +64,6 @@
     <string name="waiting_video_received">Видеоданные получены; ожидание первого кадра</string>
     <string name="waiting_tcp_note">TCP подтверждает сетевой канал к службе, но не готовность сеанса CarPlay.</string>
     <string name="waiting_observations_note">Время отсчитывается от начала попытки, это не длительность этапов. Шаги протокола могут пропускаться или повторяться.</string>
+    <string name="waiting_session_timeout">TCP CarPlay подключён, но время установления сеанса истекло</string>
+    <string name="waiting_first_frame_timeout">Сеанс CarPlay готов, но время ожидания первого изображения истекло</string>
 </resources>

@@ -18,6 +18,11 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29])
 class ConnectionFailureGuidanceTest {
+    @Test fun postTcpTimeoutsAskForRetryAndDiagnosticsRatherThanRejoiningWifi() {
+        for (reason in listOf(WirelessStartupFailure.SESSION_TIMEOUT, WirelessStartupFailure.FIRST_FRAME_TIMEOUT)) {
+            assertEquals(R.string.connection_help_general, guide("AirPlay TCP timeout", startup = reason))
+        }
+    }
     @Test fun typedFailuresHavePriorityOverMessages() {
         assertEquals(R.string.connection_help_reset_wifi,
             guide("unknown", reset = true, startup = WirelessStartupFailure.FIRST_TCP_TIMEOUT))

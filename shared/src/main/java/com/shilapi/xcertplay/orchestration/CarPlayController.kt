@@ -289,7 +289,7 @@ class CarPlayController(
     private val wirelessResourceLock = Any()
     private val wirelessFailureReported = AtomicBoolean(false)
     @Volatile private var instantBluetoothLink: InstantBluetoothLink? = null
-    @Volatile private var firstTcpWatchdog: FirstTcpWatchdog? = null
+    @Volatile private var wirelessStartupWatchdog: WirelessStartupWatchdog? = null
     @Volatile private var wiredStartWatchdog: WiredStartWatchdog? = null
     @Volatile private var wiredSessionActive = false
     @Volatile private var wiredStartSentAtNanos: Long? = null
@@ -297,7 +297,7 @@ class CarPlayController(
     @Volatile private var wirelessAlternateAddress: InetAddress? = null
     @Volatile private var wirelessAddressRecovery: HotspotAddressRecovery? = null
     private val startupTimer = java.util.concurrent.ScheduledThreadPoolExecutor(1) { task ->
-        Thread(task, "diplay-first-tcp-timeout").apply { isDaemon = true }
+        Thread(task, "diplay-wireless-startup-timeout").apply { isDaemon = true }
     }.apply { removeOnCancelPolicy = true }
     @Volatile private var wirelessDiagnostics: WirelessStartupDiagnostics? = null
     @Volatile private var bluetoothSocket: BluetoothSocket? = null
@@ -686,7 +686,7 @@ class CarPlayController(
             wirelessGeneration.incrementAndGet()
             dashboardMapOutputVisible = false
         }
-        firstTcpWatchdog?.terminate()
+        wirelessStartupWatchdog?.terminate()
         wiredStartWatchdog?.terminate()
         BydBluetoothSuspend.resume(appContext, this) { debugLog(it) }
         startupTimer.shutdownNow()
@@ -1252,7 +1252,7 @@ class CarPlayController(
 
     private fun restartWireless() {
         val generation = synchronized(wirelessResourceLock) {
-            firstTcpWatchdog?.terminate()
+            wirelessStartupWatchdog?.terminate()
             wirelessGeneration.incrementAndGet()
         }
         Thread(
@@ -1280,25 +1280,32 @@ class CarPlayController(
             }
 
             val listenerIdentity = AirPlayListenerIdentity(generation)
-            val watchdog = FirstTcpWatchdog(
+            val watchdog = WirelessStartupWatchdog(
                 listener = listenerIdentity,
                 schedule = { delay, action ->
                     val future = startupTimer.schedule({ action() }, delay, TimeUnit.MILLISECONDS)
                     val cancel: () -> Unit = { future.cancel(false); Unit }
                     cancel
                 },
-                onTimeout = {
-                    if (!closed && generation == wirelessGeneration.get()) {
-                        flipWirelessAddressFamily(generation)
-                        fail(WirelessStartupException(WirelessStartupFailure.FIRST_TCP_TIMEOUT,
-                            "No AirPlay TCP after CarPlay StartSession"), generation)
-                        Thread({ closeWirelessStack(generation = generation) }, "diplay-startup-cleanup")
-                            .apply { isDaemon = true; start() }
+                onTimeout = { reason ->
+                    // Serialize timeout ownership with generation replacement and explicit cancellation.
+                    synchronized(wirelessResourceLock) {
+                        if (!closed && generation == wirelessGeneration.get() && !wirelessFailureReported.get()) {
+                            if (reason == WirelessStartupFailure.FIRST_TCP_TIMEOUT) flipWirelessAddressFamily(generation)
+                            val message = when (reason) {
+                                WirelessStartupFailure.SESSION_TIMEOUT -> "AirPlay TCP connected, but session establishment timed out"
+                                WirelessStartupFailure.FIRST_FRAME_TIMEOUT -> "AirPlay session established, but the first rendered picture timed out"
+                                else -> "No AirPlay TCP after CarPlay StartSession"
+                            }
+                            fail(WirelessStartupException(reason, message), generation)
+                            Thread({ closeWirelessStack(generation = generation) }, "diplay-startup-cleanup")
+                                .apply { isDaemon = true; start() }
+                        }
                     }
                 },
-                log = { debugLog("wireless startup generation=$generation listener=${listenerIdentity.id} $it") },
+                log = { connectionDiagnostic("wireless startup generation=$generation listener=${listenerIdentity.id} $it") },
             )
-            firstTcpWatchdog = watchdog
+            wirelessStartupWatchdog = watchdog
             val mfi = mfiSession?.client
                 ?: throw IOException("MFi coprocessor client is unavailable")
             // Wireless CarPlay begins over Bluetooth: a radio that is off is found before the Wi-Fi is changed.
@@ -1720,13 +1727,14 @@ class CarPlayController(
         }
     }
 
-    private fun wirelessSessionListener(generation: Int, watchdog: FirstTcpWatchdog): AirPlaySessionListener =
+    private fun wirelessSessionListener(generation: Int, watchdog: WirelessStartupWatchdog): AirPlaySessionListener =
         object : AirPlaySessionListener by sessionListener {
             private var reportedFrameSession: AirPlaySession? = null
 
             override fun onConnectionMilestone(session: AirPlaySession, milestone: ConnectionMilestone) {
                 if (!isStaleWirelessRun(generation) && !session.isClosed &&
                     (activeSession == null || activeSession === session)) {
+                    watchdog.progress(milestone)
                     onStatus(CarPlayStatus.ConnectionProgress(milestone), generation)
                 }
             }
@@ -1746,7 +1754,7 @@ class CarPlayController(
             }
 
             override fun onSessionActive(session: AirPlaySession) {
-                if (isStaleWirelessRun(generation) || !watchdog.sessionEstablished()) return
+                if (isStaleWirelessRun(generation) || session.isClosed || !watchdog.sessionEstablished()) return
                 wirelessDiagnostics?.let {
                     it.sessionActive()
                     it.close()
@@ -1755,6 +1763,7 @@ class CarPlayController(
                 // Keep wirelessActiveReported false until maybeCompleteWirelessHandoff() closes
                 // the Bluetooth bootstrap after the tunneled iAP2 channel is ready.
                 sessionListener.onSessionActive(session)
+                if (session.hasRenderedCurrentMainScreen()) onVideoFrameRendered(session)
             }
 
             override fun onSessionEnded(session: AirPlaySession) {
@@ -1765,7 +1774,7 @@ class CarPlayController(
 
             override fun onVideoFrameRendered(session: AirPlaySession) {
                 if (isStaleWirelessRun(generation) || activeSession !== session) return
-                if (!watchdog.sessionEstablished()) return
+                if (session.mainScreenSessionToken() == null || !watchdog.frameRendered()) return
                 wirelessConnectionProof.rendered(generation, session)
                 val firstFrame = synchronized(this) {
                     if (reportedFrameSession === session) false else {
@@ -2741,8 +2750,8 @@ class CarPlayController(
     private fun closeWirelessStack(service: CarPlayVpnService? = vpnService, generation: Int? = null) =
         synchronized(wirelessResourceLock) {
             if (generation != null && generation != wirelessGeneration.get()) return@synchronized
-            val owner = firstTcpWatchdog?.listener
-            firstTcpWatchdog?.terminate()
+            val owner = wirelessStartupWatchdog?.listener
+            wirelessStartupWatchdog?.terminate()
             val diagnostics = wirelessDiagnostics
             wirelessDiagnostics = null
             diagnostics?.close()
@@ -3043,7 +3052,7 @@ class CarPlayController(
             val wireless = config.transport == CarPlayTransport.WIRELESS
             if (wireless) {
                 if (!wirelessFailureReported.compareAndSet(false, true)) return
-                firstTcpWatchdog?.terminate()
+                wirelessStartupWatchdog?.terminate()
             }
             val causes = generateSequence(error) { it.cause }.toList()
             onStatus(CarPlayStatus.Failed(error.message ?: error.javaClass.simpleName,

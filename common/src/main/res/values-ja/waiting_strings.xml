@@ -64,4 +64,6 @@
     <string name="waiting_video_received">映像データを受信済み；最初の映像表示を待機中</string>
     <string name="waiting_tcp_note">TCPはこのサービスへのネットワーク経路を確認するもので、CarPlayセッションの完了を意味しません。</string>
     <string name="waiting_observations_note">時刻は今回の試行開始からの経過時間であり、各段階の所要時間ではありません。プロトコルの段階は省略または繰り返されることがあります。</string>
+    <string name="waiting_session_timeout">CarPlay の TCP 接続後、セッション確立がタイムアウトしました</string>
+    <string name="waiting_first_frame_timeout">CarPlay セッション確立後、最初の映像表示がタイムアウトしました</string>
 </resources>

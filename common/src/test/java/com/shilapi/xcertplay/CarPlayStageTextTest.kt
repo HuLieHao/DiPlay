@@ -4,6 +4,7 @@ import android.os.Handler
 import android.widget.TextView
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.orchestration.CarPlayStatus
+import com.shilapi.xcertplay.network.WirelessStartupFailure
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.After
@@ -48,6 +49,10 @@ class CarPlayStageTextTest {
     }
 
     private fun stagesFollowTheConnection() {
+        assertStage(R.string.waiting_session_timeout,
+            CarPlayStatus.Failed("AirPlay setup timeout", startupFailure = WirelessStartupFailure.SESSION_TIMEOUT))
+        assertStage(R.string.waiting_first_frame_timeout,
+            CarPlayStatus.Failed("AirPlay picture timeout", startupFailure = WirelessStartupFailure.FIRST_FRAME_TIMEOUT))
         // A wired Android 7.1 failure (#557) is a retry, not a stage that never ends.
         assertStage(R.string.connection_interrupted_retrying, CarPlayStatus.Failed("Invalid argument"))
         assertStage(R.string.iphone_usb_mode_rejected,

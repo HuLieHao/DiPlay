@@ -64,4 +64,6 @@
     <string name="waiting_video_received">Dati video ricevuti; in attesa della prima immagine visualizzata</string>
     <string name="waiting_tcp_note">TCP conferma un canale di rete verso questo servizio, non una sessione CarPlay completata.</string>
     <string name="waiting_observations_note">I tempi partono dall’inizio di questo tentativo, non indicano la durata di ciascuna fase. Le fasi del protocollo possono essere saltate o ripetute.</string>
+    <string name="waiting_session_timeout">TCP CarPlay connesso, ma il tempo per avviare la sessione è scaduto</string>
+    <string name="waiting_first_frame_timeout">Sessione CarPlay pronta, ma il tempo per visualizzare la prima immagine è scaduto</string>
 </resources>

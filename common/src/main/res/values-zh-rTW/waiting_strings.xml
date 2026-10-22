@@ -64,4 +64,6 @@
     <string name="waiting_video_received">視訊資料已收到，等待首幀顯示</string>
     <string name="waiting_tcp_note">TCP 接入僅確認到本服務的網路通道，不代表 CarPlay 工作階段已建立。</string>
     <string name="waiting_observations_note">時間為距本次嘗試開始的時間，並非每步耗時；協定步驟可能略過或重複。</string>
+    <string name="waiting_session_timeout">CarPlay 網路已接通，但交握建立工作階段逾時</string>
+    <string name="waiting_first_frame_timeout">CarPlay 工作階段已建立，但等待首幀顯示逾時</string>
 </resources>

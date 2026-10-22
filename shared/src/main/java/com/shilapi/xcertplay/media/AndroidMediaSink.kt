@@ -287,7 +287,13 @@ class AndroidMediaSink(
     }
 
     override fun setVideoDiagnosticHandler(type: Int, handler: (String) -> Unit) {
-        videoDiagnosticHandlers[type] = handler
+        synchronized(videoOwnershipLock) {
+            if (videoClosed) return
+            val previous = videoDiagnosticHandlers.put(type, handler)
+            // This observer belongs to the newly negotiated stream. Retire the old renderer so
+            // its queued output cannot be reported as the new stream's first displayed picture.
+            if (previous != null && previous !== handler) videoDecoders[type]?.let { retire(type, it) }
+        }
     }
 
     private fun requestVideoRecovery(type: Int) {
@@ -676,26 +682,35 @@ class AndroidMediaSink(
         }
     }
 
-    private fun newVideoDecoder(type: Int, surface: Surface?, statsLabel: String? = null, startImmediately: Boolean = true) = VideoDecoder(
-        type,
-        surface,
-        videoWidth,
-        videoHeight,
-        preferSoftwareHevcDecoder,
-        requestKeyFrame = { requestVideoRecovery(type) },
-        report = { videoDiagnosticHandlers[type]?.invoke(it) },
-        statsLabel = statsLabel,
-        onExit = ::onVideoDecoderExit,
-        // Only the main screen goes to the host's SurfaceView; mirrors and the cluster keep their path.
-        pacingDelayNanos = if (type == MAIN_SCREEN_TYPE && statsLabel == null) videoPacingDelayMillis * 1_000_000L else 0L,
-        operatingRate = videoOperatingRate(type, statsLabel, mainVideoFrameRate),
-        vendorLowLatency = vendorLowLatencyDecoder,
-        dedicatedOutputThread = vendorLowLatencyDecoder,
-        framesAtOnce = type == MAIN_SCREEN_TYPE && statsLabel == null && videoPacingDelayMillis > 0,
-        // Keep the experimental MTK mode on the main CarPlay picture only. Mirrors and the
-        // cluster have separate timing and must retain their established decoder configuration.
-        mtkDecoderTuningEnabled = mtkDecoderTuningEnabled && type == MAIN_SCREEN_TYPE && statsLabel == null,
-    ).also { if (startImmediately) it.start() }
+    private fun newVideoDecoder(type: Int, surface: Surface?, statsLabel: String? = null, startImmediately: Boolean = true): VideoDecoder {
+        // Capture the observer: looking it up at report time relabels an old decoder's output
+        // as a replacement stream's output. Mirror diagnostics remain useful, but are not proof
+        // that the host surface has displayed CarPlay.
+        val diagnosticHandler = videoDiagnosticHandlers[type]
+        return VideoDecoder(
+            type,
+            surface,
+            videoWidth,
+            videoHeight,
+            preferSoftwareHevcDecoder,
+            requestKeyFrame = { requestVideoRecovery(type) },
+            report = { message ->
+                diagnosticHandler?.invoke(if (statsLabel != null && message == "first frame rendered")
+                    "mirror$statsLabel: $message" else message)
+            },
+            statsLabel = statsLabel,
+            onExit = ::onVideoDecoderExit,
+            // Only the main screen goes to the host's SurfaceView; mirrors and the cluster keep their path.
+            pacingDelayNanos = if (type == MAIN_SCREEN_TYPE && statsLabel == null) videoPacingDelayMillis * 1_000_000L else 0L,
+            operatingRate = videoOperatingRate(type, statsLabel, mainVideoFrameRate),
+            vendorLowLatency = vendorLowLatencyDecoder,
+            dedicatedOutputThread = vendorLowLatencyDecoder,
+            framesAtOnce = type == MAIN_SCREEN_TYPE && statsLabel == null && videoPacingDelayMillis > 0,
+            // Keep the experimental MTK mode on the main CarPlay picture only. Mirrors and the
+            // cluster have separate timing and must retain their established decoder configuration.
+            mtkDecoderTuningEnabled = mtkDecoderTuningEnabled && type == MAIN_SCREEN_TYPE && statsLabel == null,
+        ).also { if (startImmediately) it.start() }
+    }
 
     @Synchronized
     private fun audioRenderer(id: AudioStreamId, format: AudioFormat): AudioRenderer {

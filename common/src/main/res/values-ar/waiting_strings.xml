@@ -64,4 +64,6 @@
     <string name="waiting_video_received">تم استلام الفيديو؛ بانتظار ظهور أول إطار</string>
     <string name="waiting_tcp_note">يؤكد TCP وجود قناة شبكة لهذه الخدمة، وليس اكتمال جلسة CarPlay.</string>
     <string name="waiting_observations_note">الأوقات محسوبة منذ بدء المحاولة وليست مدة كل خطوة. قد يتم تخطي خطوات البروتوكول أو تكرارها.</string>
+    <string name="waiting_session_timeout">تم اتصال شبكة CarPlay، لكن انتهت مهلة إنشاء الجلسة</string>
+    <string name="waiting_first_frame_timeout">جلسة CarPlay جاهزة، لكن انتهت مهلة عرض الصورة الأولى</string>
 </resources>
