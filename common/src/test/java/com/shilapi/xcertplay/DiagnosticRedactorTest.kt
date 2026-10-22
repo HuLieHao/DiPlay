@@ -40,7 +40,7 @@ class DiagnosticRedactorTest {
         )
         for (line in lines) assertEquals(line, DiagnosticRedactor.redact(line))
         assertNull(DiagnosticRedactor.redact("Microphone: payload=private-audio"))
-        assertFalse(DiagnosticRedactor.redact("Microphone: failure peer=192.168.49.1")!!.contains("192.168.49.1"))
+        assertTrue(DiagnosticRedactor.redact("Microphone: failure peer=192.168.49.1")!!.contains("192.168.49.1"))
     }
 
     @Test fun connectionTimingAndCachedServiceMetadataSurviveWithoutPersonalIdentifiers() {
@@ -52,7 +52,7 @@ class DiagnosticRedactorTest {
         )
         for (line in lines) assertEquals(line, DiagnosticRedactor.redact(line))
         assertNull(DiagnosticRedactor.redact("CONNECTION_DIAGNOSTIC attempt=2 payload=private-data"))
-        assertFalse(DiagnosticRedactor.redact("CONNECTION_DIAGNOSTIC attempt=2 peer=192.168.49.1 id=0123456789abcdef0123456789abcdef")!!.contains("192.168.49.1"))
+        assertTrue(DiagnosticRedactor.redact("CONNECTION_DIAGNOSTIC attempt=2 peer=192.168.49.1 id=0123456789abcdef0123456789abcdef")!!.contains("192.168.49.1"))
     }
     @Test fun savedDriveReportKeepsMediaPerformanceCounters() {
         val folder = Files.createTempDirectory("diplay-media-report").toFile()
@@ -70,14 +70,18 @@ class DiagnosticRedactorTest {
         } finally { folder.deleteRecursively() }
     }
     @Test fun payloadAndCredentialLinesNeverReachReports() {
-        for (line in listOf("TRACE IAP2 tx key", "hotspot passphrase=secret", "token=secret", "certificate bytes=607", "rx body={phone: 'Jane'}", "ok\nsecret", "wifi ssid=Home", "wireless name=Jane Smith’s iPhone")) {
+        for (line in listOf("TRACE IAP2 tx key", "hotspot passphrase=secret", "token=secret", "certificate bytes=607", "rx body={phone: 'Jane'}", "ok\nsecret")) {
             assertNull(line, DiagnosticRedactor.redact(line))
         }
     }
-    @Test fun stateTransitionsSurviveWithoutAddressesOrIdentifiers() {
+    @Test fun stateTransitionsRetainRawAddressesAndIdentifiers() {
         val line = DiagnosticRedactor.redact("connected peer=C0:A6:00:29:58:0A ip=192.168.31.71 id=0123456789abcdef0123456789abcdef ipv6=fe80::1234:5678:abcd:9%p2p0")!!
         assertTrue(line.contains("connected"))
-        assertFalse(line.contains("C0:A6")); assertFalse(line.contains("192.168")); assertFalse(line.contains("012345")); assertFalse(line.contains("fe80"))
+        assertTrue(line.contains("C0:A6")); assertTrue(line.contains("192.168")); assertTrue(line.contains("012345")); assertTrue(line.contains("fe80"))
+        assertEquals("wifi ssid=Home", DiagnosticRedactor.redact("wifi ssid=Home"))
+        assertEquals("ssid=Passenger WiFi", DiagnosticRedactor.redact("ssid=Passenger WiFi"))
+        assertEquals("name=MyPassat", DiagnosticRedactor.redact("name=MyPassat"))
+        assertEquals("wireless name=Jane’s iPhone", DiagnosticRedactor.redact("wireless name=Jane’s iPhone"))
     }
     @Test fun logRotationIsBoundedAndRedactionHappensBeforeDisk() {
         val folder = Files.createTempDirectory("diplay-log-test").toFile()
@@ -122,7 +126,7 @@ class DiagnosticRedactorTest {
             "wireless hotspot backend=Wi-Fi P2P iface=p2p0 host=192.168.49.1 band=5 GHz channel=36 frequency=5180MHz",
         )
         for (line in lines) assertNotNull(line, DiagnosticRedactor.redact(line))
-        assertFalse(DiagnosticRedactor.redact(lines.last())!!.contains("192.168.49.1"))
+        assertTrue(DiagnosticRedactor.redact(lines.last())!!.contains("192.168.49.1"))
     }
 
     @Test fun startupAndAirPlayMilestonesSurviveExportWithoutWeakeningPayloadFilters() {

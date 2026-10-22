@@ -74,13 +74,13 @@ class ConnectionWaitingProgressTest {
         assertEquals(5L, progress.snapshot().totalSeconds)
     }
 
-    @Test fun retryClearsEventTimelineAndRetainsRedactedFailureAsContext() {
+    @Test fun retryClearsEventTimelineAndRetainsOriginalNetworkFailureAsContext() {
         progress.status(CarPlayStatus.ConnectionProgress(ConnectionMilestone.WIFI_CONFIG_SENT), true)
         progress.retry(1_000, "network timeout 192.168.43.2")
         time = 1_000
         progress.beginAttempt()
         assertFalse(text().contains("Wi-Fi 参数已发送"))
-        assertFalse(text().contains("192.168.43.2"))
+        assertTrue(text().contains("192.168.43.2"))
         assertTrue(text(), text().contains("network timeout"))
         assertTrue(text(), text().contains("距最近进展：0 秒"))
     }

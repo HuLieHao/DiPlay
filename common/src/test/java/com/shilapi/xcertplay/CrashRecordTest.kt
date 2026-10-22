@@ -58,7 +58,7 @@ class CrashRecordTest {
         assertEquals(2, CrashRecord.format("worker", first, 0).lines().count { it.startsWith("java.") || it.startsWith("caused by") })
     }
 
-    @Test fun theReportShowsTheRedactedRecordOrSaysThereIsNone() {
+    @Test fun theReportShowsTheOriginalNetworkAddressOrSaysThereIsNone() {
         val file = File(context.filesDir, "logs/last-crash.txt")
         file.delete()
         assertEquals("No crash recorded by this version.", CrashRecord.report(context))
@@ -66,6 +66,6 @@ class CrashRecordTest {
         file.parentFile?.mkdirs()
         file.writeText(CrashRecord.format("main", IllegalStateException("surface released at 192.168.1.20"), 5L))
         val report = CrashRecord.report(context)
-        assertTrue(report, report.startsWith("crash atEpochMs=5 thread=main\njava.lang.IllegalStateException: surface released at [ip]"))
+        assertTrue(report, report.startsWith("crash atEpochMs=5 thread=main\njava.lang.IllegalStateException: surface released at 192.168.1.20"))
     }
 }

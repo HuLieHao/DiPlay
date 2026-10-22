@@ -5,7 +5,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AsyncDiagnosticLogTest {
-    @Test fun queuedEvidenceIsRedactedAndTimestampedBeforeUsingItsCapturedFileTarget() {
+    @Test fun queuedEvidenceRetainsNetworkAddressAndTimestampBeforeUsingItsCapturedFileTarget() {
         val folder = Files.createTempDirectory("diplay-async-log").toFile()
         val old = SessionLogFile(folder.resolve("old.log"))
         val current = SessionLogFile(folder.resolve("current.log"))
@@ -18,8 +18,8 @@ class AsyncDiagnosticLogTest {
             assertTrue(AsyncDiagnosticLog.awaitIdle(2_000))
             val evidence = old.file.readText()
             assertTrue(evidence.contains("teardown end elapsedMs=117"))
-            assertTrue(evidence.contains("Microphone: start type=telephony codec=OPUS peer=[ip]"))
-            assertFalse(evidence.contains("192.168.49.1"))
+            assertTrue(evidence.contains("Microphone: start type=telephony codec=OPUS peer=192.168.49.1"))
+            assertTrue(evidence.contains("192.168.49.1"))
             assertFalse(evidence.contains("private-token")); assertFalse(evidence.contains("private-audio"))
             assertFalse(current.file.readText().contains("teardown end"))
             assertEquals(4, evidence.lineSequence().count())

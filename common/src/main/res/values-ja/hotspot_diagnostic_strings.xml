@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_hotspot_capture">ホットスポットのネットワーク診断を収集</string>
-    <string name="settings_hotspot_capture_description">読み取り専用です。最新3件の記録を再起動後も保持します。承認済みのローカル ADB があればシステム情報も収集し、設定は変更しません。収集後に診断レポートを保存してください。iPhone のインターネット接続や実際の Wi-Fi 広告は測定しません。</string>
+    <string name="settings_hotspot_capture_description">元のネットワークアドレス、ネットワーク名、端末識別情報を保持します。 読み取り専用です。最新3件の記録を再起動後も保持します。承認済みのローカル ADB があればシステム情報も収集し、設定は変更しません。収集後に診断レポートを保存してください。iPhone のインターネット接続や実際の Wi-Fi 広告は測定しません。</string>
     <string name="settings_hotspot_capture_working">ネットワーク診断を収集中…</string>
     <string name="settings_hotspot_capture_saved">記録を保存しました。診断レポートを保存して出力してください。</string>
     <string name="settings_hotspot_capture_busy">ネットワーク診断は収集中です。</string>

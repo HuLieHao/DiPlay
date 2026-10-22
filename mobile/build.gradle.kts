@@ -17,7 +17,7 @@ android {
         applicationId = "com.shihab.diplay"
         minSdk = 24
         targetSdk = 37
-        versionCode = 42
+        versionCode = 43
         versionName = "0.2.21-buick.1"
 
     }

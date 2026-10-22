@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_hotspot_capture">جمع تشخيص شبكة نقطة الاتصال</string>
-    <string name="settings_hotspot_capture_description">قراءة فقط؛ يحتفظ بآخر ثلاث لقطات بعد إعادة التشغيل. يستخدم ADB المحلي المصرح به مسبقًا إن توفر، دون تغيير نقطة الاتصال. احفظ تقرير التشخيص بعد الجمع. لا يقيس إنترنت iPhone أو بث Wi-Fi الفعلي.</string>
+    <string name="settings_hotspot_capture_description">تُحفظ عناوين الشبكة وأسماؤها ومعرّفات الأجهزة الأصلية. قراءة فقط؛ يحتفظ بآخر ثلاث لقطات بعد إعادة التشغيل. يستخدم ADB المحلي المصرح به مسبقًا إن توفر، دون تغيير نقطة الاتصال. احفظ تقرير التشخيص بعد الجمع. لا يقيس إنترنت iPhone أو بث Wi-Fi الفعلي.</string>
     <string name="settings_hotspot_capture_working">جارٍ جمع تشخيص الشبكة…</string>
     <string name="settings_hotspot_capture_saved">تم حفظ لقطة الشبكة. احفظ تقرير التشخيص لتصديرها.</string>
     <string name="settings_hotspot_capture_busy">هناك عملية جمع للشبكة قيد التنفيذ.</string>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_hotspot_capture">Capture hotspot network diagnostics</string>
-    <string name="settings_hotspot_capture_description">Read-only capture; keeps the latest three snapshots across restarts. Uses already-authorized local ADB when available, without changing the hotspot. Afterwards, save a diagnostic report. iPhone internet and actual Wi-Fi broadcasts are not measured.</string>
+    <string name="settings_hotspot_capture_description">Original network addresses, names and device identifiers are retained. Read-only capture; keeps the latest three snapshots across restarts. Uses already-authorized local ADB when available, without changing the hotspot. Afterwards, save a diagnostic report. iPhone internet and actual Wi-Fi broadcasts are not measured.</string>
     <string name="settings_hotspot_capture_working">Collecting network diagnostics…</string>
     <string name="settings_hotspot_capture_saved">Network snapshot saved. Save a diagnostic report to export it.</string>
     <string name="settings_hotspot_capture_busy">A network capture is already running.</string>

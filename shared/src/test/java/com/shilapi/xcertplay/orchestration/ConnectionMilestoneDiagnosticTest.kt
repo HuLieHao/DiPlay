@@ -34,6 +34,13 @@ class ConnectionMilestoneDiagnosticTest {
                 .apply { isAccessible = true }.invoke(controller, status, null)
             shadowOf(Looper.getMainLooper()).idle()
             assertEquals(listOf(status), statuses)
+            val snapshot = controller.javaClass.getMethod("connectionDiagnosticSnapshot").invoke(controller) as String
+            assertTrue(snapshot, snapshot.contains("transport="))
+            assertTrue(snapshot, Regex("attempt=\\d+ run=\\d+").containsMatchIn(snapshot))
+            assertTrue(snapshot, snapshot.contains("stage=ConnectionProgress"))
+            assertTrue(snapshot, snapshot.contains("lastMilestone=AIRPLAY_PAIR_VERIFY"))
+            assertTrue(snapshot, Regex("stageElapsedMs=\\d+").containsMatchIn(snapshot))
+
             assertTrue(logs.joinToString("\n"), logs.any {
                 it.startsWith("CONNECTION_DIAGNOSTIC ") && it.contains("milestone=AIRPLAY_PAIR_VERIFY") &&
                     Regex("atNs=\\d+").containsMatchIn(it)

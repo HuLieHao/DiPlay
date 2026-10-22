@@ -3,6 +3,11 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val diagnosticSourceRevision = providers.exec {
+    commandLine("git", "describe", "--always", "--dirty", "--abbrev=12")
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { it.trim().ifBlank { "unavailable" } }.get()
+
 android {
     namespace = "com.shilapi.xcertplay.host"
     compileSdk {
@@ -11,6 +16,7 @@ android {
 
     defaultConfig {
         minSdk = 24
+        buildConfigField("String", "SOURCE_REVISION", "\"$diagnosticSourceRevision\"")
     }
 
     compileOptions {
@@ -20,6 +26,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_hotspot_capture">Raccogli diagnostica rete hotspot</string>
-    <string name="settings_hotspot_capture_description">Sola lettura; conserva le ultime tre istantanee anche dopo il riavvio. Usa ADB locale già autorizzato, se disponibile, senza modificare l’hotspot. Poi salva un rapporto diagnostico. Non misura Internet su iPhone né le trasmissioni Wi-Fi effettive.</string>
+    <string name="settings_hotspot_capture_description">Vengono mantenuti indirizzi e nomi di rete e identificatori dei dispositivi originali. Sola lettura; conserva le ultime tre istantanee anche dopo il riavvio. Usa ADB locale già autorizzato, se disponibile, senza modificare l’hotspot. Poi salva un rapporto diagnostico. Non misura Internet su iPhone né le trasmissioni Wi-Fi effettive.</string>
     <string name="settings_hotspot_capture_working">Raccolta diagnostica di rete…</string>
     <string name="settings_hotspot_capture_saved">Istantanea salvata. Salva un rapporto diagnostico per esportarla.</string>
     <string name="settings_hotspot_capture_busy">Una raccolta di rete è già in corso.</string>

@@ -15,6 +15,8 @@ import java.io.File
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.NetworkInterface
+import java.net.SocketTimeoutException
+import android.util.Log
 import java.util.Collections
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -30,25 +32,31 @@ internal object HotspotNetworkDiagnostics {
     }
     private val running = AtomicBoolean()
     private val storageLock = Any()
-    private const val MAX_CAPTURE_CHARS = 48 * 1024
-    private const val MAX_SECTION_CHARS = 4096
+    private const val MAX_CAPTURE_CHARS = 640 * 1024
+    private const val MAX_SECTION_CHARS = 32 * 1024
+    private const val REMOTE_SECTION_BYTES = 128 * 1024
+    private const val EXIT_MARKER = "__BUICK_DIAG_EXIT__="
     private const val ADB_BUDGET_MILLIS = 20_000L
     private const val DIRECTORY = "hotspot-network-diagnostics"
     private val files = listOf("latest.txt", "previous-1.txt", "previous-2.txt")
-    private val extraSecret = Regex("(?i)(pre.?shared.?key|\\bpsk\\b|wep.?key|imsi|imei|subscriber|authorization|cookie|serialnumber|identity|username|user_name|fqdn|\\bextra(?:info)?\\s*[:=])")
 
     // Fixed read-only commands: no user input, su, configuration writes, service restart, or packet capture.
     private val commands = listOf(
         "privileges" to "id; getenforce; getprop ro.debuggable; getprop ro.secure; getprop service.adb.tcp.port",
         "hotspot-processes" to "ps -A | grep -E 'hostapd|wificond|netd|dnsmasq|wifi@|wifi.hostapd'",
         "hotspot-file-metadata" to "ls -ld /system/bin/hostapd /vendor/bin/hostapd /system/bin/hostapd_cli /data/misc/wifi /data/vendor/wifi /data/misc/wifi/hostapd.conf /data/vendor/wifi/hostapd/hostapd.conf",
-        "hotspot-config-selected-fields" to "grep -E '^(interface|driver|hw_mode|channel|interworking|internet|access_network_type)=' /data/misc/wifi/hostapd.conf /data/vendor/wifi/hostapd/hostapd.conf; if grep -q '^vendor_elements=' /data/misc/wifi/hostapd.conf /data/vendor/wifi/hostapd/hostapd.conf; then echo configuredVendorElements=present; else echo configuredVendorElements=unavailable_or_absent; fi; if grep -qE '^vendor_elements=.*00a04000' /data/misc/wifi/hostapd.conf /data/vendor/wifi/hostapd/hostapd.conf; then echo configuredAppleDeviceElement=present; else echo configuredAppleDeviceElement=unavailable_or_absent; fi",
-        "addresses" to "ip -o addr show",
-        "routes" to "ip route show table all; ip -6 route show table all; ip rule show",
-        "neighbours" to "ip neigh show",
-        "recent-network-log" to "logcat -d -t 300 -v threadtime -s SoftApManager WifiStateMachine WificondControl wificond hostapd dnsmasq Tethering ConnectivityService",
+        "hotspot-config-selected-fields" to "for f in /data/misc/wifi/hostapd.conf /data/vendor/wifi/hostapd/hostapd.conf; do echo configPath=\"\$f\"; grep -E '^(interface|driver|ssid|hw_mode|channel|country_code|ieee80211[nac]+|wmm_enabled|interworking|internet|access_network_type|vendor_elements)=' \"\$f\"; done",
+        "addresses" to "ip -details addr show",
+        "routes" to "ip route show table all; ip -6 route show table all; ip rule show; ip -6 rule show",
+        "neighbours" to "ip neigh show; ip -6 neigh show; cat /proc/net/arp",
+        "dhcp-leases" to "for f in /data/misc/dhcp/dnsmasq.leases /data/misc/dhcp/dnsmasq.leases6 /data/misc/wifi/dnsmasq.leases /data/vendor/dhcp/dnsmasq.leases; do echo leasePath=\"\$f\"; cat \"\$f\"; done",
+        "recent-network-log" to "logcat -d -t 1000 -v threadtime -s SoftApManager WifiStateMachine WifiClientModeImpl WifiService WificondControl wificond hostapd dnsmasq DhcpClient IpClient Tethering ConnectivityService NetworkMonitor netd",
+        "wifi-status" to "cmd wifi status",
+        "radio-and-stations" to "iw dev; iw dev ap0 station dump; iw dev wlan0 station dump; iw dev wlan1 station dump",
+        "forwarding" to "cat /proc/sys/net/ipv4/ip_forward; cat /proc/sys/net/ipv6/conf/all/forwarding; iptables -t nat -S; ip6tables -t nat -S",
         "tethering" to "dumpsys tethering",
         "connectivity" to "dumpsys connectivity",
+        "wifi-hotspot-details" to "dumpsys wifi | grep -i -A 12 -B 4 -E 'SoftAp|tether|hostapd|frequency|channel|client|dhcp|upstream'",
         "wifi" to "dumpsys wifi",
     )
 
@@ -57,59 +65,102 @@ internal object HotspotNetworkDiagnostics {
         val timer = Executors.newSingleThreadScheduledExecutor { task ->
             Thread(task, "hotspot-diagnostic-deadline").apply { isDaemon = true }
         }
+        val started = SystemClock.elapsedRealtime()
+        val captureId = "${System.currentTimeMillis()}-$started"
         val text = StringBuilder()
-        fun section(title: String, raw: String) {
+        fun event(message: String) { Log.i("BuickPlayNetworkDiag", "captureId=$captureId $message") }
+        fun section(title: String, raw: String, metadata: String = "") {
             if (text.length >= MAX_CAPTURE_CHARS) return
             val tail = title == "recent-network-log"
-            // Remote byte-tail may start inside a sensitive line, after its identifying key.
-            // Discard its first line unconditionally: LocalAdb trims whitespace, so byte length
-            // cannot reliably tell us whether the remote limit was hit.
+            // Byte-tail can begin after a credential field name. Keep complete raw lines only.
             val source = if (tail) raw.lineSequence().drop(1) else raw.lineSequence()
             val safeLines = source.mapNotNull(::sanitize).toList()
-            val selected = if (tail) safeLines.takeLast(200) else safeLines.take(200)
+            val selected = if (tail) safeLines.takeLast(1000) else safeLines.take(1000)
             val joined = selected.joinToString("\n")
-            val remaining = (MAX_CAPTURE_CHARS - text.length - title.length - 100).coerceAtLeast(0)
+            val remaining = (MAX_CAPTURE_CHARS - text.length - title.length - metadata.length - 150).coerceAtLeast(0)
             val limit = remaining.coerceAtMost(MAX_SECTION_CHARS)
             val content = if (tail) joined.takeLast(limit) else joined.take(limit)
             text.appendLine("--- $title ---")
-            if (tail && raw.isNotBlank()) text.appendLine("[first available log line omitted: may be partial after byte truncation]")
-            if (safeLines.size > 200 || joined.length > limit || raw.toByteArray(Charsets.UTF_8).size >= 32768)
-                text.appendLine(if (tail) "[truncated; keeping newest available events]" else "[truncated; showing available prefix]")
+            if (metadata.isNotEmpty()) text.appendLine(metadata)
+            if (tail && raw.isNotBlank()) text.appendLine("[first available system-log line omitted: may be partial after byte truncation]")
+            if (safeLines.size > 1000 || joined.length > limit || raw.toByteArray(Charsets.UTF_8).size >= REMOTE_SECTION_BYTES)
+                text.appendLine(if (tail) "[truncated; keeping newest available events; first line may be partial]" else "[truncated; showing available prefix]")
             text.appendLine(content)
         }
         return try {
-            section("capture", "capturedAtEpochMs=${System.currentTimeMillis()} elapsedRealtimeMs=${SystemClock.elapsedRealtime()}\n" +
+            event("capture_started")
+            section("capture", "captureId=$captureId captureStartedAt=${DiagnosticBuildInfo.timestamp()} capturedAtEpochMs=${System.currentTimeMillis()} elapsedRealtimeMs=$started\n" +
+                DiagnosticBuildInfo.report(context) +
                 "Android API=${Build.VERSION.SDK_INT} board=${Build.BOARD} hardware=${Build.HARDWARE}\n" +
                 "sessionActive=${CarPlayBackgroundSession.active} sessionPresent=${CarPlayBackgroundSession.hasSession()}\n" +
+                connectionState(context) + "\n" +
+                "Original network addresses, names and device identifiers retained. Credential/payload lines excluded.\n" +
                 "Read-only receiver snapshot; iPhone internet, routes and actual beacon IEs are NOT measured.")
-            section("app-network", runCatching { probe.basic().joinToString("\n") }
-                .getOrElse { "unavailable failureClass=${it.javaClass.simpleName}" })
+            val basicAt = SystemClock.elapsedRealtime()
+            val basic = runCatching { probe.basic().joinToString("\n") }
+            section("app-network", basic.getOrElse { "failure=${it.javaClass.simpleName}: ${it.message}" },
+                "status=${if (basic.isSuccess) "completed" else "failed"} durationMs=${SystemClock.elapsedRealtime() - basicAt}")
             val deadline = SystemClock.elapsedRealtime() + ADB_BUDGET_MILLIS
             val cancellation = timer.schedule({ runCatching { probe.close() } }, ADB_BUDGET_MILLIS, TimeUnit.MILLISECONDS)
+            val connectAt = SystemClock.elapsedRealtime()
             val access = runCatching { probe.connect() }.getOrDefault(LocalAdb.Access.UNREACHABLE)
-            section("local-adb", "access=$access approvalRequested=false")
-            if (access == LocalAdb.Access.READY) {
-                for ((name, command) in commands) {
-                    val remaining = deadline - SystemClock.elapsedRealtime()
-                    if (remaining <= 0) { section("local-adb", "collection deadline reached; remaining sections not sampled"); break }
-                    val result = runCatching {
-                        probe.shell("{ $command; } 2>&1 | ${if (name == "recent-network-log") "tail" else "head"} -c 32768", remaining.coerceAtMost(2_000).toInt())
-                    }.getOrNull()
-                    section(name, result?.takeIf { it.isNotBlank() } ?: "unavailable, empty, or timed out; not evidence of absent capability")
+            section("local-adb", "access=$access approvalRequested=false durationMs=${SystemClock.elapsedRealtime() - connectAt} budgetMs=$ADB_BUDGET_MILLIS")
+            val counts = linkedMapOf<String, Int>()
+            for ((name, command) in commands) {
+                val remaining = deadline - SystemClock.elapsedRealtime()
+                if (access != LocalAdb.Access.READY || remaining <= 0) {
+                    val reason = if (access != LocalAdb.Access.READY) "adb_$access" else "capture_deadline"
+                    section(name, "command=$command", "status=not_sampled reason=$reason")
+                    counts["not_sampled"] = (counts["not_sampled"] ?: 0) + 1
+                    continue
                 }
-            } else section("local-adb", "System details not sampled. Basic snapshot retained; no permission or ADB configuration changed.")
+                val budget = remaining.coerceAtMost(2_000).toInt()
+                val commandAt = SystemClock.elapsedRealtime()
+                // Marker is inside the bounded stream: if a prefix limit removes it, exit status
+                // is explicitly unknown instead of reporting the pipeline's misleading exit=0.
+                val wrapped = "{ $command; code=\$?; printf '\\n${EXIT_MARKER}%s\\n' \"\$code\"; } 2>&1 | ${if (name == "recent-network-log") "tail" else "head"} -c $REMOTE_SECTION_BYTES"
+                val result = runCatching { probe.shell(wrapped, budget) }
+                val raw = result.getOrNull()
+                val exit = raw?.let { Regex("(?m)^${EXIT_MARKER}([0-9]+)\\s*$").find(it)?.groupValues?.get(1)?.toIntOrNull() }
+                val status = when {
+                    result.exceptionOrNull() is SocketTimeoutException -> "timed_out"
+                    result.isFailure -> "failed"
+                    raw == null -> "link_failed"
+                    exit == null -> "incomplete_output"
+                    exit != 0 -> "exit_nonzero"
+                    else -> "completed"
+                }
+                counts[status] = (counts[status] ?: 0) + 1
+                val duration = SystemClock.elapsedRealtime() - commandAt
+                val metadata = "status=$status exitCode=${exit ?: "unknown"} durationMs=$duration timeoutMs=$budget"
+                event("section=$name $metadata")
+                val output = raw?.replace(Regex("(?m)^${EXIT_MARKER}[0-9]+\\s*$"), "")
+                    ?: result.exceptionOrNull()?.let { "failure=${it.javaClass.simpleName}: ${it.message}" }
+                    ?: "ADB link failed or was cancelled; no output returned"
+                section(name, output, "$metadata\ncommand=$command")
+            }
             cancellation.cancel(false)
+            section("capture-result", "captureId=$captureId captureCompletedAt=${DiagnosticBuildInfo.timestamp()} durationMs=${SystemClock.elapsedRealtime() - started}\n" +
+                "commandSummary=$counts\n" + connectionState(context))
             section("interpretation", "Selected configuration fields are not proof of actual broadcast contents.\n" +
-                "Config probes use known candidate paths only; missing files or permission denial do not prove unsupported hardware.\n" +
-                "Compare captures while Wi-Fi-only, CarPlay connecting, and CarPlay running; phone internet tests must be recorded separately.")
+                "Station Wi-Fi/DHCP describes the receiver upstream, NOT the iPhone DHCP assignment.\n" +
+                "Config/lease probes use known candidate paths only; unavailable files, permissions or tools do not prove absent capability.\n" +
+                "Compare captures while connecting and running. Record iPhone internet tests separately. Original identifiers are retained.")
             save(context, text.toString())
+            event("capture_saved durationMs=${SystemClock.elapsedRealtime() - started}")
             Outcome.SAVED
-        } catch (_: Exception) { Outcome.FAILED }
-        finally { runCatching { probe.close() }; timer.shutdownNow(); running.set(false) }
+        } catch (error: Exception) {
+            event("capture_failed failure=${error.javaClass.simpleName}: ${error.message}")
+            Outcome.FAILED
+        } finally { runCatching { probe.close() }; timer.shutdownNow(); running.set(false) }
     }
 
-    private fun sanitize(line: String): String? =
-        if (extraSecret.containsMatchIn(line)) null else DiagnosticRedactor.redact(line.replace(Regex("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"), "?"))
+    private fun connectionState(context: Context): String =
+        CarPlayBackgroundSession.snapshot()?.controller?.connectionDiagnosticSnapshot()
+            ?: "transport=${if (AirPlayPersistence.loadWirelessEnabled(context)) "WIRELESS" else "WIRED"} controller=absent stage=not_running"
+
+    private fun sanitize(line: String): String? = if (DiagnosticRedactor.containsCredential(line)) null else
+        line.replace(Regex("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"), "?")
 
     private fun save(context: Context, text: String) = synchronized(storageLock) {
         val folder = File(context.filesDir, DIRECTORY).apply { check(mkdirs() || isDirectory) }
@@ -174,13 +225,32 @@ internal object HotspotNetworkDiagnostics {
                         "validated=${caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)} " +
                         "dnsCount=${link?.dnsServers?.size} routes=${link?.routes?.size} " +
                         "defaultRoute=${link?.routes?.any { it.isDefaultRoute }}")
+                    add("networkIndex=$index capabilities=$caps")
+                    add("networkIndex=$index linkProperties=$link")
                 }
             }.onFailure { add("networkDetailsUnavailable=${it.javaClass.simpleName}") }
+            runCatching {
+                val wifi = app.getSystemService(WifiManager::class.java)
+                @Suppress("DEPRECATION") val station = wifi?.connectionInfo
+                add("stationWifi=$station (receiver upstream, not hotspot radio)")
+                add("stationFrequencyMHz=${station?.frequency} linkSpeedMbps=${station?.linkSpeed} rssiDbm=${station?.rssi} networkId=${station?.networkId}")
+                @Suppress("DEPRECATION") val dhcp = wifi?.dhcpInfo
+                add("stationDhcp=$dhcp (receiver upstream, not iPhone lease)")
+                val hotspot = CarPlayBackgroundSession.hotspotReady
+                add("sessionHotspot=${hotspot?.let { "backend=${it.backend} ssid=${it.ssid} band=${it.band} channel=${it.channel} bssid=${it.bssid} address=${it.address}" } ?: "not_observed"}")
+                val config = wifi?.javaClass?.getMethod("getWifiApConfiguration")?.invoke(wifi) as? android.net.wifi.WifiConfiguration
+                add("legacyHotspotConfig=${config?.let { "ssid=${it.SSID} channel=${runCatching { it.javaClass.getField("apChannel").get(it) }.getOrNull()} band=${runCatching { it.javaClass.getField("apBand").get(it) }.getOrNull()}" } ?: "unavailable"}")
+            }.onFailure { add("wifiRadioDetailsUnavailable=${it.javaClass.simpleName}: ${it.message}") }
+            runCatching {
+                add("arpTable=" + File("/proc/net/arp").readText().take(8192))
+            }.onFailure { add("arpTableUnavailable=${it.javaClass.simpleName}: ${it.message}") }
             runCatching {
                 Collections.list(NetworkInterface.getNetworkInterfaces()).take(16).forEach { network ->
                     val addresses = Collections.list(network.inetAddresses)
                     add("iface=${network.name} up=${network.isUp} loopback=${network.isLoopback} " +
-                        "ipv4Count=${addresses.count { it is Inet4Address }} ipv6Count=${addresses.count { it is Inet6Address }}")
+                        "ipv4Count=${addresses.count { it is Inet4Address }} ipv6Count=${addresses.count { it is Inet6Address }} " +
+                        "addresses=${network.interfaceAddresses} mtu=${network.mtu} multicast=${network.supportsMulticast()} " +
+                        "mac=${runCatching { network.hardwareAddress?.joinToString(":") { "%02x".format(it.toInt() and 0xff) } }.getOrNull()}")
                 }
             }.onFailure { add("interfacesUnavailable=${it.javaClass.simpleName}") }
         }
@@ -193,16 +263,22 @@ internal object HotspotNetworkDiagnostics {
                 val current = client() ?: return null
                 current to ++commandGeneration
             }
+            val timedOut = AtomicBoolean()
             val timeout = commandTimer.schedule({
                 synchronized(clientLock) {
                     if (commandGeneration == generation && adb === current) {
                         // soTimeout alone only limits idle reads. Close even a continuously busy stream.
+                        timedOut.set(true)
                         current.cancelPendingOperations()
                         adb = null // A later command may reconnect without requesting authorization.
                     }
                 }
             }, timeoutMillis.toLong(), TimeUnit.MILLISECONDS)
-            return try { current.shell(command, timeoutMillis) }
+            return try {
+                val result = current.shell(command, timeoutMillis)
+                if (timedOut.get()) throw SocketTimeoutException("command wall-clock deadline reached")
+                result
+            }
             finally {
                 synchronized(clientLock) { if (commandGeneration == generation) commandGeneration++ }
                 timeout.cancel(false)

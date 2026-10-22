@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_hotspot_capture">采集热点网络诊断</string>
-    <string name="settings_hotspot_capture_description">只读采集，保留最近三份快照，重启后仍保留。有已授权的本地 ADB 时补充系统信息，不修改热点。采集后请保存诊断报告；不检测 iPhone 上网或实际热点广播。</string>
+    <string name="settings_hotspot_capture_description">原始网络地址、网络名称和设备标识不脱敏。 只读采集，保留最近三份快照，重启后仍保留。有已授权的本地 ADB 时补充系统信息，不修改热点。采集后请保存诊断报告；不检测 iPhone 上网或实际热点广播。</string>
     <string name="settings_hotspot_capture_working">正在采集网络诊断…</string>
     <string name="settings_hotspot_capture_saved">网络快照已保存，请保存诊断报告导出。</string>
     <string name="settings_hotspot_capture_busy">已有网络采集正在进行。</string>

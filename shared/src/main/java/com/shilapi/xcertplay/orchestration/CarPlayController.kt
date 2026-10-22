@@ -236,6 +236,31 @@ class CarPlayController(
     private val usbAdbGrantAttempts = mutableSetOf<String>()
     private val pendingUsbAdbGrants = mutableSetOf<String>()
     private var lastReportedStatus: CarPlayStatus? = null
+    private val diagnosticStateLock = Any()
+    private var diagnosticStage = "not_started"
+    private var diagnosticStageAt = System.nanoTime()
+    private var diagnosticRunAt = diagnosticStageAt
+    private var diagnosticLastMilestone = "none"
+    private var diagnosticProgressAt = diagnosticStageAt
+
+    /** Read-only snapshot for a manual network capture; no UI ownership or transport changes. */
+    fun connectionDiagnosticSnapshot(): String = synchronized(diagnosticStateLock) {
+        "transport=${config.transport} attempt=$diagnosticAttempt run=${diagnosticRun.get()} " +
+            "phase=${if (phase == Phase.IPHONE) "USB_DISCOVERY" else phase.name} " +
+            "stage=$diagnosticStage stageElapsedMs=${elapsedMillis(diagnosticStageAt)} " +
+            "runElapsedMs=${elapsedMillis(diagnosticRunAt)} lastMilestone=$diagnosticLastMilestone " +
+            "sinceProgressMs=${elapsedMillis(diagnosticProgressAt)} closed=$closed"
+    }
+
+    private fun beginDiagnosticRun() = synchronized(diagnosticStateLock) {
+        diagnosticRun.incrementAndGet()
+        diagnosticRunAt = System.nanoTime()
+        diagnosticStageAt = diagnosticRunAt
+        diagnosticProgressAt = diagnosticRunAt
+        diagnosticStage = "starting"
+        diagnosticLastMilestone = "none"
+    }
+
     private var mfiResetLogged = false
 
     @Volatile private var closed = false
@@ -1236,7 +1261,7 @@ class CarPlayController(
         val generation = synchronized(wirelessResourceLock) {
             if (closed || expectedGeneration != null && expectedGeneration != wirelessGeneration.get()) return
             wirelessFailureReported.set(false)
-            diagnosticRun.incrementAndGet()
+            beginDiagnosticRun()
             availabilityPollGeneration.incrementAndGet()
             phase = Phase.WIRELESS
             wirelessHandoffRequested.set(false)
@@ -1915,7 +1940,7 @@ class CarPlayController(
     }
 
     private fun startIphone() {
-        diagnosticRun.incrementAndGet()
+        beginDiagnosticRun()
         availabilityPollGeneration.incrementAndGet()
         permissionPollGeneration++
         usbAdbGrantAttempts.clear()
@@ -3127,6 +3152,13 @@ class CarPlayController(
             if (!closed && (generation == null || generation == wirelessGeneration.get()) && status != lastReportedStatus) {
                 lastReportedStatus = status
                 val milestone = (status as? CarPlayStatus.ConnectionProgress)?.milestone
+                synchronized(diagnosticStateLock) {
+                    diagnosticStage = status.javaClass.simpleName
+                    diagnosticStageAt = observedAtNanos
+                    diagnosticProgressAt = observedAtNanos
+                    if (milestone != null) diagnosticLastMilestone = milestone.name
+                }
+
                 connectionDiagnostic("stage=${status.javaClass.simpleName}" +
                     if (milestone != null) " milestone=$milestone atNs=$observedAtNanos" else "")
                 uiListener?.onDebugLog(status.debugLogMessage())
