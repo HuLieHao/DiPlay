@@ -214,6 +214,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var testToneTrack: AudioTrack? = null
     private var toneStop: Runnable? = null
     private var exportButton: Button? = null
+    private var hotspotCaptureButton: Button? = null
+    private var hotspotCaptureInProgress = false
     private var rootScroll: ScrollView? = null
     private var settingsRailScroll: ScrollView? = null
     private var reconnectBar: View? = null
@@ -688,6 +690,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         reconnectBar = null
         readinessCard = null
         exportButton = null
+        hotspotCaptureButton = null
         bydAdbControls = null
         adbSwitches.clear()
         adbStatus = null
@@ -1761,6 +1764,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
         filteredSection(content, SettingsSection.DIAGNOSTICS,
             getString(R.string.diagnostics), R.drawable.ic_dp_diagnostics) { card ->
+            hotspotCaptureButton = button(getString(if (hotspotCaptureInProgress)
+                R.string.settings_hotspot_capture_working else R.string.settings_hotspot_capture), false) {
+                captureHotspotDiagnostics()
+            }.apply { isEnabled = !hotspotCaptureInProgress }
+            card.addView(hotspotCaptureButton, matchButton(CONTROL_GAP_DP, CONTROL_HEIGHT_DP))
+            card.addView(label(getString(R.string.settings_hotspot_capture_description), 14, MUTED))
             exportButton = button(if (exportInProgress) getString(R.string.saving_report) else getString(R.string.save_diagnostic_report), false) {
                 saveReportToDownloads()
             }.apply { isEnabled = !exportInProgress }
@@ -5876,6 +5885,27 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }, "adb-cluster-authorize").start()
     }
 
+    private fun captureHotspotDiagnostics() {
+        if (hotspotCaptureInProgress) return
+        hotspotCaptureInProgress = true
+        hotspotCaptureButton?.apply { isEnabled = false; text = getString(R.string.settings_hotspot_capture_working) }
+        val app = applicationContext
+        Thread({
+            val result = runCatching { HotspotNetworkDiagnostics.collect(app) }
+                .getOrDefault(HotspotNetworkDiagnostics.Outcome.FAILED)
+            runOnUiThread {
+                hotspotCaptureInProgress = false
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                hotspotCaptureButton?.apply { isEnabled = true; text = getString(R.string.settings_hotspot_capture) }
+                toast(getString(when (result) {
+                    HotspotNetworkDiagnostics.Outcome.SAVED -> R.string.settings_hotspot_capture_saved
+                    HotspotNetworkDiagnostics.Outcome.BUSY -> R.string.settings_hotspot_capture_busy
+                    HotspotNetworkDiagnostics.Outcome.FAILED -> R.string.settings_hotspot_capture_failed
+                }))
+            }
+        }, "buickplay-hotspot-diagnostics").start()
+    }
+
     private fun reportFileName() = "DiPlay-${SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())}.txt"
 
     private fun saveReportToDownloads() {
@@ -6024,6 +6054,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine("--- Last crash recorded by DiPlay ---")
         appendLine(CrashRecord.report(appContext))
         appendLine()
+        appendLine(HotspotNetworkDiagnostics.report(appContext))
         for (name in SessionLogFile.REPORT_NAMES) {
             val file = File(appContext.filesDir, "logs/$name")
             if (file.isFile) {

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_hotspot_capture">擷取熱點網路診斷</string>
+    <string name="settings_hotspot_capture_description">唯讀擷取，保留最近三份快照，重新啟動後仍保留。有已授權的本機 ADB 時補充系統資訊，不修改熱點。擷取後請儲存診斷報告；不偵測 iPhone 上網或實際熱點廣播。</string>
+    <string name="settings_hotspot_capture_working">正在擷取網路診斷…</string>
+    <string name="settings_hotspot_capture_saved">網路快照已儲存，請儲存診斷報告匯出。</string>
+    <string name="settings_hotspot_capture_busy">已有網路擷取正在進行。</string>
+    <string name="settings_hotspot_capture_failed">網路快照儲存失敗。</string>
+</resources>

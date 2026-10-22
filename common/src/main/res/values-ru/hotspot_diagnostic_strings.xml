@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_hotspot_capture">Собрать диагностику сети точки доступа</string>
+    <string name="settings_hotspot_capture_description">Только чтение; последние три снимка сохраняются после перезагрузки. Используется уже разрешённый локальный ADB без изменения точки доступа. Затем сохраните отчёт. Интернет iPhone и фактические объявления Wi-Fi не проверяются.</string>
+    <string name="settings_hotspot_capture_working">Сбор диагностики сети…</string>
+    <string name="settings_hotspot_capture_saved">Снимок сохранён. Сохраните диагностический отчёт для экспорта.</string>
+    <string name="settings_hotspot_capture_busy">Сбор данных сети уже выполняется.</string>
+    <string name="settings_hotspot_capture_failed">Не удалось сохранить снимок сети.</string>
+</resources>

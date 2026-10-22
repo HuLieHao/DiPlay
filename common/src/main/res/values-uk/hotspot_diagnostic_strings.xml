@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_hotspot_capture">Зібрати діагностику мережі точки доступу</string>
+    <string name="settings_hotspot_capture_description">Лише читання; останні три знімки зберігаються після перезапуску. Використовується вже дозволений локальний ADB без зміни точки доступу. Потім збережіть звіт. Інтернет iPhone та фактичні оголошення Wi-Fi не перевіряються.</string>
+    <string name="settings_hotspot_capture_working">Збирання діагностики мережі…</string>
+    <string name="settings_hotspot_capture_saved">Знімок збережено. Збережіть діагностичний звіт для експорту.</string>
+    <string name="settings_hotspot_capture_busy">Збирання даних мережі вже триває.</string>
+    <string name="settings_hotspot_capture_failed">Не вдалося зберегти знімок мережі.</string>
+</resources>
