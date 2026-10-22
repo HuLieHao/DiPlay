@@ -47,12 +47,16 @@ interface MediaSink {
  * past it can still hand over one item; the successor's configuration and keyframe follow it. The iPhone
  * connects after SETUP returns the port, which is after the stream is registered as current.
  */
-internal fun currentScreenListener(type: Int, sink: MediaSink, isCurrent: () -> Boolean) = object : ScreenStream.Listener {
+internal fun currentScreenListener(type: Int, sink: MediaSink, onFirstFrame: () -> Unit = {}, isCurrent: () -> Boolean) = object : ScreenStream.Listener {
+    private var firstFrame = true
+    private fun received(data: ByteArray) {
+        if (firstFrame && data.isNotEmpty()) { firstFrame = false; onFirstFrame() }
+    }
     override fun onCodec(codec: VideoCodec) { if (isCurrent()) sink.onVideoCodec(type, codec) }
     override fun onConfig(codecData: ByteArray) { if (isCurrent()) sink.onVideoConfig(type, codecData) }
-    override fun onFrame(naluBytes: ByteArray) { if (isCurrent()) sink.onVideoFrame(type, naluBytes) }
+    override fun onFrame(naluBytes: ByteArray) { if (isCurrent()) { received(naluBytes); sink.onVideoFrame(type, naluBytes) } }
     override fun onFrame(naluBytes: ByteArray, senderNanos: Long, arrivalNanos: Long) {
-        if (isCurrent()) sink.onVideoFrame(type, naluBytes, senderNanos, arrivalNanos)
+        if (isCurrent()) { received(naluBytes); sink.onVideoFrame(type, naluBytes, senderNanos, arrivalNanos) }
     }
 }
 
@@ -147,7 +151,10 @@ class CarPlayMediaEngine(
             }
         }
         val port = screen.listen(
-            object : ScreenStream.Listener by currentScreenListener(type, sink, isCurrent = { streams[streamKey] === screen }) {
+            object : ScreenStream.Listener by currentScreenListener(type, sink,
+                onFirstFrame = {
+                    if (type == 110) session.connectionMilestone(com.shilapi.xcertplay.ConnectionMilestone.VIDEO_RECEIVED)
+                }, isCurrent = { streams[streamKey] === screen }) {
                 override fun onClosed(cause: Throwable?) {
                     Log.w(
                         TAG,

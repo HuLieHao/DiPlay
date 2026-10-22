@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay.orchestration
 
+import com.shilapi.xcertplay.ConnectionMilestone
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothA2dp
@@ -112,6 +113,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 sealed class CarPlayStatus {
+    data class ConnectionProgress(val milestone: ConnectionMilestone) : CarPlayStatus()
     data object DiscoveringMfi : CarPlayStatus()
     data object WaitingForMfi : CarPlayStatus()
     data object RequestingMfiPermission : CarPlayStatus()
@@ -128,6 +130,8 @@ sealed class CarPlayStatus {
     data object WaitingForPairedIphone : CarPlayStatus()
     data object ConnectingBluetooth : CarPlayStatus()
     data object RunningWireless : CarPlayStatus()
+    data object WaitingForAirPlay : CarPlayStatus()
+    data object EstablishingAirPlay : CarPlayStatus()
     data object WirelessActive : CarPlayStatus()
     data object WirelessActiveFallback : CarPlayStatus()
     data object DiscoveringIphone : CarPlayStatus()
@@ -337,6 +341,10 @@ class CarPlayController(
     /** The live AirPlay session, for a new host that adopts the running stream without a session-active callback. */
     fun activeAirPlaySession(): AirPlaySession? = activeSession?.takeIf { !closed && !it.isClosed }
 
+    /** The wireless session's rendered proof survives a decoder surface or Activity recreation. */
+    fun hasRenderedWirelessFrame(): Boolean = activeAirPlaySession() != null &&
+        wirelessConnectionProof.hasRenderedFrame(wirelessGeneration.get())
+
     /** The video session can outlive its Activity; the new host must be able to replay the mask. */
     fun activeIphoneCornerMask(): Triple<AirPlaySession, ByteArray, Int>? {
         val current = currentCornerMask ?: return null
@@ -350,6 +358,11 @@ class CarPlayController(
             if (activeSession != null && activeSession !== session) return
             currentCornerMask = SessionCornerMask(session, png.copyOf(), displayWidth)
             uiListener?.onCornerMask(session, png, displayWidth)
+        }
+        override fun onConnectionMilestone(session: AirPlaySession, milestone: ConnectionMilestone) {
+            if (!closed && !session.isClosed && (activeSession == null || activeSession === session)) {
+                onStatus(CarPlayStatus.ConnectionProgress(milestone))
+            }
         }
         override fun onSessionActive(session: AirPlaySession) {
             wiredSessionActive = true
@@ -1569,7 +1582,11 @@ class CarPlayController(
                 timeoutMillis = controlLoopTimeoutMillis(),
                 keepAliveAfterDeadline = { keepBluetoothControlAlive(generation) },
                 beforeStartSession = { startedHotspot?.validateReady() },
-                onStartSessionSent = { watchdog.startSessionSent(it.sentAtNanos) },
+                onStartSessionSent = {
+                    watchdog.startSessionSent(it.sentAtNanos)
+                    onStatus(CarPlayStatus.WaitingForAirPlay, generation)
+                },
+                onMilestone = { onStatus(CarPlayStatus.ConnectionProgress(it), generation) },
                 onIncoming = ::onRouteFrame,
                 onProgress = { message ->
                     diagnostics.controlProgress(message)
@@ -1707,9 +1724,19 @@ class CarPlayController(
         object : AirPlaySessionListener by sessionListener {
             private var reportedFrameSession: AirPlaySession? = null
 
+            override fun onConnectionMilestone(session: AirPlaySession, milestone: ConnectionMilestone) {
+                if (!isStaleWirelessRun(generation) && !session.isClosed &&
+                    (activeSession == null || activeSession === session)) {
+                    onStatus(CarPlayStatus.ConnectionProgress(milestone), generation)
+                }
+            }
+
             override fun onTcpAccepted(event: AirPlayTcpAccepted) {
                 if (isStaleWirelessRun(generation)) return
-                if (watchdog.accepted(event)) wirelessDiagnostics?.connectionAccepted()
+                if (watchdog.accepted(event)) {
+                    wirelessDiagnostics?.connectionAccepted()
+                    onStatus(CarPlayStatus.EstablishingAirPlay, generation)
+                }
             }
 
             override fun onTransportError(message: String) {
@@ -3086,10 +3113,13 @@ class CarPlayController(
 
     private fun onStatus(status: CarPlayStatus, generation: Int? = null) {
         if (closed) return
+        val observedAtNanos = System.nanoTime()
         mainHandler.post {
             if (!closed && (generation == null || generation == wirelessGeneration.get()) && status != lastReportedStatus) {
                 lastReportedStatus = status
-                connectionDiagnostic("stage=${status.javaClass.simpleName}")
+                val milestone = (status as? CarPlayStatus.ConnectionProgress)?.milestone
+                connectionDiagnostic("stage=${status.javaClass.simpleName}" +
+                    if (milestone != null) " milestone=$milestone atNs=$observedAtNanos" else "")
                 uiListener?.onDebugLog(status.debugLogMessage())
                 uiStatusReporter?.invoke(status)
             }
@@ -3097,6 +3127,7 @@ class CarPlayController(
     }
 
     private fun CarPlayStatus.debugLogMessage(): String = when (this) {
+        is CarPlayStatus.ConnectionProgress -> "STEP connection/progress: $milestone"
         CarPlayStatus.DiscoveringMfi ->
             "STEP mfi/start: preparing the configured MFi authentication provider"
         CarPlayStatus.WaitingForMfi ->
@@ -3116,6 +3147,10 @@ class CarPlayController(
             "STEP bt/rfcomm: connecting to the iPhone iAP2 RFCOMM service"
         CarPlayStatus.RunningWireless ->
             "STEP iap2/wireless: Bluetooth control loop running"
+        CarPlayStatus.WaitingForAirPlay ->
+            "STEP network/wait: waiting for the iPhone AirPlay TCP connection"
+        CarPlayStatus.EstablishingAirPlay ->
+            "STEP airplay/handshake: iPhone TCP accepted; negotiating the AirPlay session"
         CarPlayStatus.WirelessActive ->
             "STEP handoff/complete: tunnel iAP2 ready; Bluetooth bootstrap released"
         CarPlayStatus.WirelessActiveFallback ->

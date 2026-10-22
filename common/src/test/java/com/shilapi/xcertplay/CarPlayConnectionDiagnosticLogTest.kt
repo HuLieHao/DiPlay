@@ -53,4 +53,12 @@ class CarPlayConnectionDiagnosticLogTest {
         assertTrue(AsyncDiagnosticLog.awaitIdle(2_000))
         assertFalse(log.contains("private-token"))
     }
+
+    @Test fun handshakeMilestoneIsSavedWhileTheSettingsMenuIsOpen() {
+        activity.javaClass.getDeclaredField("menuOpen").apply { isAccessible = true }.set(activity, true)
+        listener.onDebugLog("${CarPlayController.CONNECTION_DIAGNOSTIC_PREFIX} attempt=1 " +
+            "stage=ConnectionProgress milestone=AIRPLAY_PAIR_VERIFY atNs=123456789")
+        assertTrue(AsyncDiagnosticLog.awaitIdle(2_000))
+        assertTrue(log.contains("milestone=AIRPLAY_PAIR_VERIFY atNs=123456789"))
+    }
 }

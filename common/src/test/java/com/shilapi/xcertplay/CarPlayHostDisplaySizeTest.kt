@@ -602,6 +602,52 @@ class CarPlayHostDisplaySizeTest {
         }
     }
 
+    @Test fun adoptingAnAlreadyPlayingStreamDoesNotCountPlaybackAsConnectionTime() =
+        checkAdoptedRenderState(renderedFrames = 4, wirelessProof = false, waiting = false)
+
+    @Test fun adoptingAConfiguredStreamWithoutRenderedVideoKeepsWaiting() =
+        checkAdoptedRenderState(renderedFrames = 0, wirelessProof = false, waiting = true)
+
+    @Test fun adoptingAnAlreadyRenderedWirelessStreamWithoutDecoderCountersStopsTiming() =
+        checkAdoptedRenderState(renderedFrames = null, wirelessProof = true, waiting = false)
+
+    private fun checkAdoptedRenderState(renderedFrames: Long?, wirelessProof: Boolean, waiting: Boolean) {
+        var time = 0L
+        val progress = ConnectionWaitingProgress { time }
+        setField("waitingProgress", progress)
+        val session = org.mockito.Mockito.mock(AirPlaySession::class.java)
+        val controller = org.mockito.Mockito.mock(CarPlayController::class.java)
+        org.mockito.Mockito.`when`(controller.nowPlayingSnapshot()).thenReturn(CarPlayNowPlaying())
+        org.mockito.Mockito.`when`(controller.activeAirPlaySession()).thenReturn(session)
+        org.mockito.Mockito.`when`(controller.hasRenderedWirelessFrame()).thenReturn(wirelessProof)
+        val sink = org.mockito.Mockito.mock(AndroidMediaSink::class.java)
+        org.mockito.Mockito.`when`(sink.liveVideoCounters()).thenReturn(renderedFrames?.let {
+            com.shilapi.xcertplay.media.LiveVideoCounters(5, it, 0, 0)
+        })
+        org.mockito.Mockito.doAnswer { invocation ->
+            invocation.getArgument<((Int, Boolean) -> Unit)>(0).invoke(110, true)
+            null
+        }.`when`(sink).setScreenStreamActiveChangedListener(org.mockito.ArgumentMatchers.any())
+        try {
+            CarPlayBackgroundSession.store(controller, sink, 1920, 990, Any(),
+                CarPlaySessionDisplay(1920, 990, Surface.ROTATION_0, true, true, 1920, 990)) {}
+            assertEquals(true, invoke("adoptBackgroundSession"))
+            assertEquals(waiting, progress.isWaiting)
+            if (waiting) {
+                assertEquals(WaitingPhaseState.CURRENT, progress.snapshot().phases.last().state)
+            } else {
+                time = 3_600_000
+                progress.retry(2_000, "disconnected")
+                time += 2_000
+                progress.beginAttempt()
+                assertEquals(2L, progress.snapshot().totalSeconds)
+                assertEquals(1, progress.snapshot().attempt)
+            }
+        } finally {
+            sink.close()
+        }
+    }
+
     private fun startSession(
         rotation: Int = Surface.ROTATION_0,
         windowWidth: Int = 1920,

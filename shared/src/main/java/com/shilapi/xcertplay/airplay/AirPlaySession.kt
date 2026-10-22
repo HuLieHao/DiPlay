@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
 import android.util.Log
+import com.shilapi.xcertplay.ConnectionMilestone
 import com.shilapi.xcertplay.mfi.MfiAuthenticator
 import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
 import java.io.BufferedInputStream
@@ -25,6 +26,7 @@ data class AirPlayDeviceInfo(
 
 /** Session lifecycle and command callbacks for the driver/UI layer. */
 interface AirPlaySessionListener {
+    fun onConnectionMilestone(session: AirPlaySession, milestone: ConnectionMilestone) {}
     fun onTcpAccepted(event: AirPlayTcpAccepted) {}
     fun onSessionActive(session: AirPlaySession) {}
     fun onSessionEnded(session: AirPlaySession) {}
@@ -92,6 +94,7 @@ class AirPlaySession(
     private val closed = AtomicBoolean(false)
     internal val isClosed: Boolean get() = closed.get()
     private val notified = AtomicBoolean(false)
+    private val connectionMilestones = java.util.EnumSet.noneOf(ConnectionMilestone::class.java)
     private var eventServer: ServerSocket? = null
     private var eventSocket: Socket? = null
     private var eventCipher: ControlCipher? = null
@@ -127,6 +130,16 @@ class AirPlaySession(
     fun syncedNtp(): BigInteger = ntp.syncedNtp()
 
     internal fun logDebug(message: String) = debugLog(message)
+
+    internal fun connectionMilestone(milestone: ConnectionMilestone) {
+        if (closed.get()) return
+        val fresh = synchronized(connectionMilestones) { connectionMilestones.add(milestone) }
+        if (fresh) try {
+            listener.onConnectionMilestone(this, milestone)
+        } catch (error: Exception) {
+            Log.w(TAG, "connection progress callback failed", error)
+        }
+    }
 
     internal fun videoFrameRendered() {
         if (!closed.get()) listener.onVideoFrameRendered(this)
@@ -336,13 +349,16 @@ class AirPlaySession(
 
     /** [contacts] carry Android pointer ids; an empty list releases every finger. */
     fun sendTouch(contacts: List<AirPlayContact>): Boolean {
+        val touchGeneration = com.shilapi.xcertplay.media.TouchLatencyProbe.currentGeneration()
         val scaled = touchSlots.assign(contacts).map {
             it.copy(x = it.x * config.main.widthPixels, y = it.y * config.main.heightPixels)
         }
         val report = AirPlayHid.touchReport(scaled)
         val sendStartNs = System.nanoTime()
         val sent = sendHidReport(AirPlayHid.TOUCH_HID_UID, report)
-        if (sent) com.shilapi.xcertplay.media.TouchLatencyProbe.onTouchSent(sendStartNs, System.nanoTime() - sendStartNs)
+        if (sent) com.shilapi.xcertplay.media.TouchLatencyProbe.onTouchSent(
+            sendStartNs, System.nanoTime() - sendStartNs, touchGeneration,
+        )
         if (sent && firstTouchSendLogged.compareAndSet(false, true)) {
             val first = scaled.firstOrNull()
             Log.i(
@@ -526,6 +542,7 @@ class AirPlaySession(
     }
 
     private fun handle(request: RtspMessage.Request): RtspMessage.Response {
+        AirPlayControlDiagnostics.milestone(request.method, request.path)?.let(::connectionMilestone)
         when (request.method) {
             "SETUP" -> return handleSetup(request)
             "SET_PARAMETER" -> {

@@ -52,17 +52,24 @@ class CarPlayStageTextTest {
         assertStage(R.string.connection_interrupted_retrying, CarPlayStatus.Failed("Invalid argument"))
         assertStage(R.string.iphone_usb_mode_rejected,
             CarPlayStatus.Failed("CarPlay configuration request transferred -1 of 1 bytes"))
-        assertStage(R.string.connect_your_iphone_with_a_usb_cable, CarPlayStatus.WaitingForIphone)
-        assertStage(R.string.allow_the_connection_permission_to_continue, CarPlayStatus.RequestingIphonePermission)
-        assertStage(R.string.looking_for_your_paired_iphone, CarPlayStatus.WaitingForPairedIphone)
-        assertStage(R.string.connecting_to_your_iphone, CarPlayStatus.ConnectingBluetooth)
-        assertStage(R.string.opening_carplay, CarPlayStatus.RunningControl)
-        assertStage(R.string.reconnecting_to_your_iphone, CarPlayStatus.ControlEnded)
+        assertStage(R.string.waiting_for_iphone_over_usb, CarPlayStatus.WaitingForIphone)
+        assertStage(R.string.requesting_iphone_usb_permission, CarPlayStatus.RequestingIphonePermission)
+        assertStage(R.string.waiting_for_paired_iphone, CarPlayStatus.WaitingForPairedIphone)
+        assertStage(R.string.connecting_bluetooth, CarPlayStatus.ConnectingBluetooth)
+        assertStage(R.string.waiting_step_auth, CarPlayStatus.RunningWireless)
+        assertStage(R.string.waiting_step_network, CarPlayStatus.WaitingForAirPlay)
+        assertStage(R.string.waiting_step_handshake, CarPlayStatus.EstablishingAirPlay)
+        assertStage(R.string.carplay_control_running, CarPlayStatus.RunningControl)
+        assertStage(R.string.carplay_control_window_ended, CarPlayStatus.ControlEnded)
         assertStage(R.string.waiting_for_mfi_coprocessor, CarPlayStatus.WaitingForMfi)
-        assertStage(R.string.getting_carplay_ready, CarPlayStatus.OpeningDataPaths)
+        assertStage(R.string.opening_usb_data_paths, CarPlayStatus.OpeningDataPaths)
     }
 
     private fun assertStage(expected: Int, status: CarPlayStatus) {
+        ReflectionHelpers.getField<ConnectionWaitingProgress>(activity, "waitingProgress").apply {
+            reset()
+            beginAttempt()
+        }
         val reporter = ReflectionHelpers.callInstanceMethod<(CarPlayStatus) -> Unit>(
             activity, "createStatusReporter",
             ClassParameter.from(Int::class.javaPrimitiveType, ReflectionHelpers.getField<Int>(activity, "restartGeneration")),

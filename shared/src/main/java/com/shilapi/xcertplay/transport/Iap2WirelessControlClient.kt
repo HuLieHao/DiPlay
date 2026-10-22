@@ -7,6 +7,7 @@ import com.shilapi.xcertplay.iap2.session.Iap2Session
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
 import com.shilapi.xcertplay.mfi.Iap2MfiAuthenticationClient
 import kotlin.math.min
+import com.shilapi.xcertplay.ConnectionMilestone
 
 /**
  * The wireless LIVI control sequence after a CSM channel is ready:
@@ -33,6 +34,7 @@ class Iap2WirelessControlClient(
         // Evaluated only in the authenticated control loop when its original deadline expires.
         // The caller must prove that the current CarPlay session is usable before keeping it alive.
         keepAliveAfterDeadline: () -> Boolean = { false },
+        onMilestone: (ConnectionMilestone) -> Unit = {},
         onProgress: (String) -> Unit = {},
     ): Iap2WirelessControlResult {
         require(identification.wireless != null) {
@@ -47,11 +49,15 @@ class Iap2WirelessControlClient(
         if (identified.vehicleStatusEnabled != identification.vehicleStatusEnabled) {
             onProgress("iap2 no battery reading: not declaring an electric vehicle")
         }
+        onMilestone(ConnectionMilestone.IDENTIFYING)
         Iap2IdentificationClient(session).identify(identified, deadline.requireRemaining(), onProgress)
+        onMilestone(ConnectionMilestone.IDENTIFIED)
         onProgress("iap2 identification accepted")
         var stage = Iap2WirelessControlStage.IDENTIFIED
 
+        onMilestone(ConnectionMilestone.AUTHENTICATING)
         mfi.run(session, deadline.requireRemaining(), onProgress)
+        onMilestone(ConnectionMilestone.AUTHENTICATED)
         stage = Iap2WirelessControlStage.AUTHENTICATED
         onProgress("iap2 authentication accepted")
 
@@ -143,6 +149,7 @@ class Iap2WirelessControlClient(
                             )
                         } else {
                             sendControl(accessoryWiFiConfiguration(endpoint))
+                            onMilestone(ConnectionMilestone.WIFI_CONFIG_SENT)
                             stage = later(
                                 stage,
                                 if (postTransport) {
@@ -197,6 +204,7 @@ class Iap2WirelessControlClient(
                             )
                         } else {
                             sendControl(accessoryWiFiConfiguration(endpoint))
+                            onMilestone(ConnectionMilestone.WIFI_CONFIG_SENT)
                             stage = later(
                                 stage,
                                 Iap2WirelessControlStage.POST_TRANSPORT_WIFI_CONFIG_SENT,

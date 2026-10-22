@@ -43,6 +43,22 @@ class CurrentScreenListenerTest {
     private val frame = byteArrayOf(0, 0, 0, 1, 0x65, 0x11)
     private val timedFrame = byteArrayOf(0, 0, 0, 1, 0x41, 0x22)
 
+    @Test fun firstVideoProgressRequiresNonemptyDataFromTheCurrentStreamAndIsReportedOnce() {
+        var current = false
+        var firstFrames = 0
+        val sink = RecordingSink()
+        val listener = currentScreenListener(110, sink, onFirstFrame = { firstFrames++ }) { current }
+        listener.onFrame(frame)
+        assertEquals(0, firstFrames)
+        current = true
+        listener.onFrame(byteArrayOf())
+        assertEquals(0, firstFrames)
+        listener.onFrame(frame, 1L, 2L)
+        listener.onFrame(frame)
+        assertEquals(1, firstFrames)
+        assertEquals(3, sink.take().size)
+    }
+
     private fun ScreenStream.Listener.deliverAll(codec: VideoCodec = VideoCodec.H265) {
         onCodec(codec)
         onConfig(config)

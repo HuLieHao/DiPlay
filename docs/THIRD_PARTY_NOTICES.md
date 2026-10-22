@@ -1,5 +1,9 @@
 # Credits and license notices
 
+## BuickPlay fork branding
+
+The `kaiyue` fork modifies DiPlay 0.2.18 as BuickPlay 0.2.18-buick.1 (2026-10-13). Original copyright, GPL-3.0 and AGPL-3.0 notices remain applicable to their respective code. Buick and its emblem are General Motors brand assets; the user-supplied replacement image in `common/src/main/res/raw/ic_car_home.png` is not relicensed under the code licenses. Its redistribution rights have not been independently established. This personal customization does not imply Buick/General Motors or Apple endorsement or certification.
+
 ## Receiver
 
 DiPlay is a modified version of [xcertplay by shilapi](https://github.com/shilapi/xcertplay). The upstream receiver is licensed under GNU GPL version 3; the full text is in `LICENSE` and the original README is retained in `docs/UPSTREAM-README.md`.

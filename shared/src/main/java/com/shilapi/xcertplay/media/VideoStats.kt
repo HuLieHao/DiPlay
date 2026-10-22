@@ -7,6 +7,7 @@ internal class VideoStats(
     private val label: String = "",
     private val nanoTime: () -> Long = System::nanoTime,
 ) {
+    private val touchGeneration = if (label.isEmpty()) TouchLatencyProbe.beginStream() else null
     private var windowStartNs = nanoTime()
     private var lastArrivalNs = 0L
     private var received = 0
@@ -28,7 +29,7 @@ internal class VideoStats(
         if (lastArrivalNs != 0L && gap < IDLE_GAP_NS) maxArrivalGapNs = maxOf(maxArrivalGapNs, gap)
         lastArrivalNs = now
         // Touches only change the main screen; a second stream must not consume their samples.
-        val touchLatency = if (label.isEmpty()) TouchLatencyProbe.onFrame(now) else -1L
+        val touchLatency = touchGeneration?.let { TouchLatencyProbe.onFrame(now, it) } ?: -1L
         if (touchLatency >= 0) {
             touchSamples++
             touchLatencySumNs += touchLatency
@@ -66,15 +67,18 @@ internal class VideoStats(
         val elapsedNs = now - windowStartNs
         if (elapsedNs < WINDOW_NS) return null
         val seconds = elapsedNs / 1e9
-        if (received == 0 && touchSamples == 0) { windowStartNs = now; return null }
+        val touchWindow = touchGeneration?.let { TouchLatencyProbe.finishWindow(it, now) }
+            ?: TouchLatencyProbe.Window(0, 0)
+        if (received == 0 && touchSamples == 0 && touchWindow.maxSendNs == 0L && touchWindow.expired == 0L) {
+            windowStartNs = now; return null
+        }
         val touchAvgMs = if (touchSamples == 0) -1 else touchLatencySumNs / touchSamples / 1_000_000
         val line = ("video stats$label rx=%.1ffps shown=%.1ffps maxGap=%dms kbps=%d recoveries=%d " +
-            "touch2frame avg=%dms max=%dms n=%d touchSendMax=%dms").format(
+            "touch2frame avg=%dms max=%dms n=%d touchSendMax=%dms touchExpired=%d").format(
             received / seconds, rendered / seconds, maxArrivalGapNs / 1_000_000,
             (bytes * 8 / 1000 / seconds).toLong(), recoveries,
-            touchAvgMs, maxTouchLatencyNs / 1_000_000, touchSamples, TouchLatencyProbe.maxSendNs / 1_000_000,
+            touchAvgMs, maxTouchLatencyNs / 1_000_000, touchSamples, touchWindow.maxSendNs / 1_000_000, touchWindow.expired,
         ) + decodeSummary()
-        TouchLatencyProbe.maxSendNs = 0
         Log.i(TAG, line)
         windowStartNs = now
         received = 0; rendered = 0; recoveries = 0; bytes = 0; maxArrivalGapNs = 0

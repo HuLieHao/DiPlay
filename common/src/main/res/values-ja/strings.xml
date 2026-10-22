@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">DiPlay</string>
+    <string name="app_name">BuickPlay</string>
     <string name="language_section_title">言語</string>
     <string name="language_app_language">アプリの言語</string>
     <string name="language_system_default">システムの設定に従う</string>
@@ -131,7 +131,7 @@
     <string name="automatic_map_setup_adb">地図の自動設定 · ADB</string>
     <string name="availability_depends_on_your_head_unit_s_startup_settings">利用可否は車載端末の起動設定によって異なります。</string>
     <string name="back">戻る</string>
-    <string name="back_to_diplay">DiPlayに戻る</string>
+    <string name="back_to_diplay">BuickPlayに戻る</string>
     <string name="band">周波数帯</string>
     <string name="bluetooth_settings">Bluetooth設定</string>
     <string name="byd_navigation">BYDナビゲーション</string>
@@ -196,7 +196,7 @@
     <string name="default_placeholder_icon">標準の仮アイコン</string>
     <string name="diagnostic_report_saved">診断レポートを保存しました</string>
     <string name="diagnostics">診断</string>
-    <string name="diplay">DiPlay</string>
+    <string name="diplay">BuickPlay</string>
     <string name="discard_changes_and_exit_settings">変更を破棄して設定を終了</string>
     <string name="disconnect">切断</string>
     <string name="discovering_iphone">iPhoneを検索しています</string>

@@ -286,6 +286,17 @@ class CarPlayVpnService : VpnService() {
                         pairings = current.pairings,
                         mfi = current.mfi,
                         listener = object : AirPlaySessionListener by current.listener {
+                            // Keep this explicit: stale incremental delegates can otherwise inherit
+                            // the interface's empty default for a newly added diagnostic callback.
+                            override fun onConnectionMilestone(
+                                session: AirPlaySession,
+                                milestone: com.shilapi.xcertplay.ConnectionMilestone,
+                            ) {
+                                if (current.listenerIdentity == null || !internalPeer) {
+                                    current.listener.onConnectionMilestone(session, milestone)
+                                }
+                            }
+
                             override fun onSessionActive(session: AirPlaySession) {
                                 if (current.listenerIdentity == null || !internalPeer) current.listener.onSessionActive(session)
                             }
