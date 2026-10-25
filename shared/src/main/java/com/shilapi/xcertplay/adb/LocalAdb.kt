@@ -69,7 +69,15 @@ class LocalAdb(
 
     /** Same as [shell], pushing [stdin] to the command right after the stream opens; no EOF is implied. */
     @Synchronized
-    fun shell(command: String, readTimeoutMillis: Int, stdin: ByteArray?): String? {
+    fun shell(command: String, readTimeoutMillis: Int, stdin: ByteArray?): String? =
+        shellInternal(command, readTimeoutMillis, stdin, reportTimeout = false)
+
+    /** Diagnostic callers distinguish an idle read timeout from a disconnected ADB link. */
+    @Synchronized
+    fun shellForDiagnostics(command: String, readTimeoutMillis: Int): String? =
+        shellInternal(command, readTimeoutMillis, null, reportTimeout = true)
+
+    private fun shellInternal(command: String, readTimeoutMillis: Int, stdin: ByteArray?, reportTimeout: Boolean): String? {
         if (cancelled.get()) return null
         if (socket?.isClosed != false && connect(mayAsk = false) != Access.READY) return null
         return try {
@@ -105,6 +113,10 @@ class LocalAdb(
                 }
             }
             text.toString().trim().also { socket?.soTimeout = READ_TIMEOUT_MS }
+        } catch (error: SocketTimeoutException) {
+            closeQuietly()
+            if (reportTimeout) throw error
+            null
         } catch (_: IOException) {
             closeQuietly()
             null

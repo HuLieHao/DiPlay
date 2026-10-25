@@ -20,9 +20,9 @@ class AsyncDiagnosticLogTest {
             assertTrue(evidence.contains("teardown end elapsedMs=117"))
             assertTrue(evidence.contains("Microphone: start type=telephony codec=OPUS peer=192.168.49.1"))
             assertTrue(evidence.contains("192.168.49.1"))
-            assertFalse(evidence.contains("private-token")); assertFalse(evidence.contains("private-audio"))
+            assertTrue(evidence.contains("private-token")); assertTrue(evidence.contains("private-audio"))
             assertFalse(current.file.readText().contains("teardown end"))
-            assertEquals(4, evidence.lineSequence().count())
+            assertEquals(6, evidence.lineSequence().count())
         } finally {
             old.close(); current.close(); folder.deleteRecursively()
         }

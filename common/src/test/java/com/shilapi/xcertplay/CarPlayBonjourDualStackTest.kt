@@ -30,6 +30,50 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29], manifest = Config.NONE)
 class CarPlayBonjourDualStackTest {
+    @Test fun independentRegistriesCloseTogetherAndLockStaysHeldUntilBothFinish() {
+        verifyConcurrentClose(false)
+    }
+
+    @Test fun interruptionAndOneRegistryFailureStillWaitForTheOtherRegistry() {
+        verifyConcurrentClose(true)
+    }
+
+    private fun verifyConcurrentClose(interruptedAndFailing: Boolean) {
+        setup()
+        val entered = java.util.concurrent.CountDownLatch(2)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val v4 = mock(JmDNS::class.java)
+        val v6 = mock(JmDNS::class.java)
+        for (dns in listOf(v4, v6)) doAnswer {
+            entered.countDown()
+            check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            if (interruptedAndFailing && dns === v4) throw IOException("registry shutdown failure")
+            null
+        }.`when`(dns).close()
+        mockStatic(JmDNS::class.java).use { factory ->
+            factory.`when`<JmDNS> { JmDNS.create(ipv4, "carplay-020000000002") }.thenReturn(v4)
+            factory.`when`<JmDNS> { JmDNS.create(ipv6, "carplay-020000000002") }.thenReturn(v6)
+            val bonjour = CarPlayBonjour(context, config, identity, ipv4.hostAddress, true,
+                additionalAddresses = listOf(ipv6))
+            bonjour.start()
+            val finished = executor.submit<Boolean> {
+                if (interruptedAndFailing) Thread.currentThread().interrupt()
+                bonjour.close()
+                Thread.currentThread().isInterrupted
+            }
+            try {
+                assertTrue("both registry closes must start before either finishes", entered.await(2, java.util.concurrent.TimeUnit.SECONDS))
+                assertFalse(finished.isDone)
+                verify(lock, never()).release()
+            } finally {
+                release.countDown()
+                assertEquals(interruptedAndFailing, finished.get(5, java.util.concurrent.TimeUnit.SECONDS))
+                executor.shutdownNow()
+            }
+            verify(lock).release()
+        }
+    }
     private val context = mock(Context::class.java)
     private val wifi = mock(WifiManager::class.java)
     private val lock = mock(WifiManager.MulticastLock::class.java)

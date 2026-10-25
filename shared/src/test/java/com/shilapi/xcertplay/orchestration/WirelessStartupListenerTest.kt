@@ -15,6 +15,20 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [27], manifest = Config.NONE)
 class WirelessStartupListenerTest {
+    @Test fun staleWirelessRunRetainsDiagnosticsWithoutForwardingOrdinaryLogs() {
+        Fixture().use { f ->
+            (f.controller.javaClass.getDeclaredField("wirelessGeneration").apply { isAccessible = true }
+                .get(f.controller) as java.util.concurrent.atomic.AtomicInteger).incrementAndGet()
+            f.listener.onDebugLog("CONNECTION_DIAGNOSTIC airplay-first-close source=video")
+            f.listener.onDebugLog("TRACE airplay control response-buffered cseq=7 writeMs=1700")
+            f.listener.onDebugLog("TRACE airplay control responses-flushed lastCseq=7 flushMs=1")
+            f.listener.onDebugLog("old ordinary state")
+            assertTrue(f.logs.any { it.contains("airplay-first-close source=video") })
+            assertTrue(f.logs.any { it.contains("writeMs=1700") })
+            assertTrue(f.logs.any { it.contains("lastCseq=7") })
+            assertFalse(f.logs.any { it.contains("old ordinary state") })
+        }
+    }
     @Test fun primaryPictureRenderedBeforeRecordIsRecognizedOnceSessionBecomesActive() {
         Fixture().use { f ->
             f.connected()

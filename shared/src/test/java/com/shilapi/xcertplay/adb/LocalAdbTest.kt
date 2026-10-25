@@ -109,6 +109,41 @@ class LocalAdbTest {
         adbd.join(1_000)
     }
 
+    @Test fun diagnosticShellPreservesReadTimeoutWhileLegacyShellStillReturnsNull() {
+        for (diagnostic in listOf(false, true)) {
+            LocalAdb(key).use { adb ->
+                val input = object : java.io.InputStream() {
+                    override fun read(): Int = throw java.net.SocketTimeoutException("synthetic idle timeout")
+                }
+                for ((name, value) in listOf("socket" to java.net.Socket(), "input" to input,
+                    "output" to java.io.ByteArrayOutputStream()))
+                    LocalAdb::class.java.getDeclaredField(name).apply { isAccessible = true }.set(adb, value)
+                val result = runCatching {
+                    if (diagnostic) adb.shellForDiagnostics("id", 100) else adb.shell("id", 100)
+                }
+                if (diagnostic) {
+                    assertTrue(result.exceptionOrNull() is java.net.SocketTimeoutException)
+                    assertEquals("synthetic idle timeout", result.exceptionOrNull()?.message)
+                } else {
+                    assertTrue(result.isSuccess)
+                    assertNull(result.getOrNull())
+                }
+            }
+        }
+    }
+
+    @Test fun diagnosticShellStillReturnsNullForRealLinkFailures() {
+        LocalAdb(key).use { adb ->
+            val input = object : java.io.InputStream() {
+                override fun read(): Int = throw java.io.IOException("synthetic broken connection")
+            }
+            for ((name, value) in listOf("socket" to java.net.Socket(), "input" to input,
+                "output" to java.io.ByteArrayOutputStream()))
+                LocalAdb::class.java.getDeclaredField(name).apply { isAccessible = true }.set(adb, value)
+            assertNull(adb.shellForDiagnostics("id", 100))
+        }
+    }
+
     private fun littleEndian(buffer: ByteBuffer, size: Int): BigInteger {
         val bytes = ByteArray(size).also { buffer.get(it) }
         return BigInteger(1, bytes.reversedArray())

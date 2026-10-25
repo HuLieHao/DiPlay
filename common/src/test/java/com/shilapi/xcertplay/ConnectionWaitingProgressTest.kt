@@ -116,13 +116,13 @@ class ConnectionWaitingProgressTest {
         assertTrue(progress.snapshot().phases.drop(1).all { it.state == WaitingPhaseState.PENDING && it.elapsedMillis == null })
     }
 
-    @Test fun stoppedTimerFreezesAndSensitiveFailureIsNotDisplayed() {
+    @Test fun stoppedTimerFreezesAndOriginalFailureRemainsVisible() {
         time = 4_000
         progress.stop("token=private-token")
         time = 40_000
         assertTrue(text(), text().contains("总耗时：4 秒"))
         assertTrue(text(), text().contains("自动重试已停止"))
-        assertFalse(text().contains("private-token"))
+        assertTrue(text().contains("private-token"))
         assertEquals(WaitingPhaseState.INTERRUPTED, progress.snapshot().phases.first().state)
     }
 

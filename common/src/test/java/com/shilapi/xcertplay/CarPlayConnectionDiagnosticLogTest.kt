@@ -48,10 +48,20 @@ class CarPlayConnectionDiagnosticLogTest {
         assertEquals(2, activity.javaClass.getDeclaredField("restartGeneration").apply { isAccessible = true }.get(activity))
     }
 
-    @Test fun theDiagnosticPrefixDoesNotBypassCredentialRedaction() {
+    @Test fun connectionDiagnosticLogRetainsOriginalCredentialText() {
         listener.onDebugLog("${CarPlayController.CONNECTION_DIAGNOSTIC_PREFIX} attempt=1 token=private-token")
         assertTrue(AsyncDiagnosticLog.awaitIdle(2_000))
-        assertFalse(log.contains("private-token"))
+        assertTrue(log.contains("token=private-token"))
+    }
+
+    @Test fun responseTimingsSurviveOpenMenuAndOldGeneration() {
+        activity.javaClass.getDeclaredField("menuOpen").apply { isAccessible = true }.set(activity, true)
+        listener.onDebugLog("TRACE airplay control response-buffered cseq=7 encryptMs=12 writeMs=1700")
+        listener.onDebugLog("TRACE airplay control responses-flushed lastCseq=7 flushMs=1")
+        assertTrue(AsyncDiagnosticLog.awaitIdle(2_000))
+        assertTrue(log.contains("encryptMs=12 writeMs=1700"))
+        assertTrue(log.contains("lastCseq=7 flushMs=1"))
+        assertTrue(log.contains("controllerGeneration=1"))
     }
 
     @Test fun handshakeMilestoneIsSavedWhileTheSettingsMenuIsOpen() {

@@ -166,7 +166,7 @@ class CarPlayMediaEngine(
                     if (streams.remove(streamKey, screen)) {
                         sink.onScreenStreamActive(type, false)
                     }
-                    session.close()
+                    session.closeWithReason("video", "stream ended type=$type", cause)
                 }
             },
         )
@@ -423,7 +423,7 @@ class CarPlayMediaEngine(
                                 TAG,
                                 "iAP tunnel ended reason=${cause?.message ?: "peer EOF"}",
                             )
-                            session.close()
+                            session.closeWithReason("iap-tunnel", "stream ended", cause)
                         }
                     },
                 )
@@ -480,7 +480,7 @@ class CarPlayMediaEngine(
         if (!attached) {
             Log.w(TAG, "iAP tunnel relay attachment was rejected after SETUP")
             pending.bridge.close()
-            session.close()
+            session.closeWithReason("iap-attach", "relay attachment rejected")
         }
     }
 

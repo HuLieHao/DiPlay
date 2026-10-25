@@ -264,7 +264,7 @@
     <string name="navigation_stream_type">Тип потока навигации</string>
     <string name="nearby_devices">Рядом находящиеся устройства</string>
     <string name="nearby_devices_connects_your_iphone_microphone_enables_sir">«Рядом находящиеся устройства» связывают iPhone. Микрофон нужен для Siri и звонков. Старые версии Android также требуют местоположение для беспроводной настройки. Режим USB может запросить локальное VPN-подключение.</string>
-    <string name="nothing_is_sent_automatically_protocol_payloads_and_creden">Ничего не отправляется автоматически. Данные протокола и учётные данные исключены.</string>
+    <string name="settings_diagnostic_report_raw_content_hint">Ничего не отправляется автоматически. Собранные журналы сохраняются без маскирования данных; ограничения размера сохраняются.</string>
     <string name="oem_label">Метка OEM</string>
     <string name="on_your_iphone_open_settings_bluetooth_and_pair_with_the_c">На iPhone откройте Настройки → Bluetooth и свяжитесь с автомобилем. Затем вернитесь в DiPlay и выберите «Подключить телефон».</string>
     <string name="one_time_setup_on_this_car">Разовая настройка для этого автомобиля</string>

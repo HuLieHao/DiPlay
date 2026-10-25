@@ -33,6 +33,53 @@ class WirelessStartupWatchdogTest {
         timer!!()
         assertEquals(1, failures)
     }
+    @Test fun successfulAuthenticationAllowsSessionSetupWithoutRepeatedRenewal() {
+        val watch = watchdog()
+        watch.accepted(event())
+        val originalTimer = timer!!
+        now = 29_000
+        watch.authenticationResponseSent()
+        assertEquals(59_000L, deadline)
+        originalTimer()
+        assertEquals(0, failures)
+        now = 40_000
+        watch.authenticationResponseSent()
+        assertEquals(59_000L, deadline)
+        now = 59_000
+        timer!!()
+        assertEquals(1, failures)
+    }
+
+    @Test fun authenticationCannotReviveExpiredSession() {
+        val watch = watchdog()
+        watch.accepted(event())
+        now = 30_000
+        timer!!()
+        watch.authenticationResponseSent()
+        assertEquals(1, failures)
+        assertTrue(watch.terminated)
+    }
+
+    @Test fun authenticationCannotChangeFirstFrameDeadline() {
+        val watch = watchdog()
+        watch.accepted(event())
+        now = 2_000
+        watch.sessionEstablished()
+        now = 20_000
+        watch.authenticationResponseSent()
+        assertEquals(32_000L, deadline)
+    }
+
+    @Test fun delayedTimerDoesNotPermitLateAuthenticationToExtendDeadline() {
+        val watch = watchdog()
+        watch.accepted(event())
+        now = 30_001
+        watch.authenticationResponseSent()
+        assertEquals(30_000L, deadline)
+        timer!!()
+        assertEquals(1, failures)
+    }
+
     private var now = 0L
     private var deadline: Long? = null
     private var timer: (() -> Unit)? = null

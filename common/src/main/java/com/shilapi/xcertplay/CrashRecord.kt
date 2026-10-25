@@ -12,7 +12,7 @@ import java.util.IdentityHashMap
 /**
  * Keeps DiPlay's last uncaught exception so the next diagnostic report shows where it crashed. Android 11+ only
  * records `reason=java_crash`, which left a crash inside the DiYou launcher card without a cause (#463). The record
- * stays on the head unit, and the report redacts it like any log line.
+ * stays on the head unit, and the report retains its original text like any log line.
  */
 internal object CrashRecord {
     private const val FILE = "logs/last-crash.txt"

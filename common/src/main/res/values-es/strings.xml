@@ -264,7 +264,7 @@
     <string name="navigation_stream_type">Tipo de flujo de navegación</string>
     <string name="nearby_devices">Dispositivos cercanos</string>
     <string name="nearby_devices_connects_your_iphone_microphone_enables_sir">«Dispositivos cercanos» conecta tu iPhone. El micrófono activa Siri y las llamadas. Las versiones antiguas de Android también requieren Ubicación para la configuración inalámbrica. El modo USB puede pedir una conexión VPN local.</string>
-    <string name="nothing_is_sent_automatically_protocol_payloads_and_creden">No se envía nada automáticamente. Las cargas del protocolo y las credenciales quedan excluidas.</string>
+    <string name="settings_diagnostic_report_raw_content_hint">No se envía nada automáticamente. Los registros recopilados se conservan sin ocultar datos; se mantienen los límites de tamaño.</string>
     <string name="oem_label">Etiqueta OEM</string>
     <string name="on_your_iphone_open_settings_bluetooth_and_pair_with_the_c">En tu iPhone, abre Ajustes → Bluetooth y empareja con el coche. Después vuelve a DiPlay y elige «Conectar teléfono».</string>
     <string name="one_time_setup_on_this_car">Configuración única en este coche</string>

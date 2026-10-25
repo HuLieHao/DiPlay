@@ -5,7 +5,7 @@ import org.junit.Test
 import java.nio.file.Files
 
 class DiagnosticRedactorTest {
-    @Test fun additionalTroubleshootingMetadataSurvivesSavedReportWithoutPayloads() {
+    @Test fun troubleshootingMetadataAndPayloadTextSurviveSavedReport() {
         val lines = listOf(
             "wireless startup elapsedMs=10000 authenticated=true wifiConfigs=2 startRequests=1 tcpAccepted=0 sessionActive=false waitingFor=WiFi_discovery_or_AirPlay_TCP startRequestAgeMs=9000 firstTcpAfterStartMs=none",
             "receiveCounters windowMs=10000 udpScope=device ifaceRx=sampled ifaceRxPacketsDelta=400 ifaceRxBytesDelta=8000 ifaceRxDroppedDelta=2 ifaceRxErrorsDelta=0 ifaceRxMissedErrorsDelta=1 udp4=sampled udp4InDatagramsDelta=390 udp4InErrorsDelta=2 udp4RcvbufErrorsDelta=1 udp4InCsumErrorsDelta=1 udp6=unavailable failureClass=FileNotFoundException",
@@ -28,22 +28,22 @@ class DiagnosticRedactorTest {
             }
             val report = file.readText()
             lines.forEach { assertTrue(report.contains(it)) }
-            assertFalse(report.contains("private-recording"))
+            assertTrue(report.contains("private-recording"))
         } finally { folder.deleteRecursively() }
     }
 
-    @Test fun boundedMicrophoneStartFailureAndCaptureCountersSurviveRedaction() {
+    @Test fun microphoneFailureAndCaptureCountersRetainOriginalText() {
         val lines = listOf(
             "Microphone: start type=telephony source=VOICE_COMMUNICATION codec=OPUS rate=48000 channels=1 frameMs=20 routedDeviceType=15",
             "Microphone: failure type=speechrecognition source=VOICE_RECOGNITION codec=LPCM rate=16000 channels=1 frameMs=20 stage=READ error=none code=-3",
             "Microphone: stats type=telephony source=VOICE_COMMUNICATION codec=OPUS rate=48000 channels=1 frameMs=20 routedDeviceType=15 captureBytes=1920 reads=2 zeroReads=1 readErrors=0 readMaxMs=30 encodedFrames=1 emptyEncodedFrames=1 udpSent=2 sendErrors=1 sendGapMaxMs=30 ended=false",
         )
         for (line in lines) assertEquals(line, DiagnosticRedactor.redact(line))
-        assertNull(DiagnosticRedactor.redact("Microphone: payload=private-audio"))
+        assertNotNull(DiagnosticRedactor.redact("Microphone: payload=private-audio"))
         assertTrue(DiagnosticRedactor.redact("Microphone: failure peer=192.168.49.1")!!.contains("192.168.49.1"))
     }
 
-    @Test fun connectionTimingAndCachedServiceMetadataSurviveWithoutPersonalIdentifiers() {
+    @Test fun connectionTimingAndCachedServiceMetadataRetainIdentifiers() {
         val lines = listOf(
             "CONNECTION_DIAGNOSTIC attempt=2 phase=CONTROL wired io final readCalls=105 writeCalls=50 readTimeouts=3 ends=0 failures=1 maxReadMs=909 maxWriteMs=1937",
             "CONNECTION_DIAGNOSTIC attempt=2 phase=WIRELESS Bluetooth snapshot point=after-failure enabled=true bondState=12 cachedServiceCount=5 cachedIap2Service=false",
@@ -51,7 +51,7 @@ class DiagnosticRedactorTest {
             "CONNECTION_DIAGNOSTIC attempt=2 phase=USB_DISCOVERY USB configuration ready=true configurationId=6 reenumerationAttempts=0 action=reuse-descriptors",
         )
         for (line in lines) assertEquals(line, DiagnosticRedactor.redact(line))
-        assertNull(DiagnosticRedactor.redact("CONNECTION_DIAGNOSTIC attempt=2 payload=private-data"))
+        assertNotNull(DiagnosticRedactor.redact("CONNECTION_DIAGNOSTIC attempt=2 payload=private-data"))
         assertTrue(DiagnosticRedactor.redact("CONNECTION_DIAGNOSTIC attempt=2 peer=192.168.49.1 id=0123456789abcdef0123456789abcdef")!!.contains("192.168.49.1"))
     }
     @Test fun savedDriveReportKeepsMediaPerformanceCounters() {
@@ -69,9 +69,9 @@ class DiagnosticRedactorTest {
             assertTrue(report.contains(video))
         } finally { folder.deleteRecursively() }
     }
-    @Test fun payloadAndCredentialLinesNeverReachReports() {
+    @Test fun payloadAndCredentialLinesAreRetained() {
         for (line in listOf("TRACE IAP2 tx key", "hotspot passphrase=secret", "token=secret", "certificate bytes=607", "rx body={phone: 'Jane'}", "ok\nsecret")) {
-            assertNull(line, DiagnosticRedactor.redact(line))
+            assertEquals(line, DiagnosticRedactor.redact(line))
         }
     }
     @Test fun stateTransitionsRetainRawAddressesAndIdentifiers() {
@@ -83,7 +83,7 @@ class DiagnosticRedactorTest {
         assertEquals("name=MyPassat", DiagnosticRedactor.redact("name=MyPassat"))
         assertEquals("wireless name=Jane’s iPhone", DiagnosticRedactor.redact("wireless name=Jane’s iPhone"))
     }
-    @Test fun logRotationIsBoundedAndRedactionHappensBeforeDisk() {
+    @Test fun logRotationRemainsBoundedWithUnfilteredContent() {
         val folder = Files.createTempDirectory("diplay-log-test").toFile()
         try {
             val log = SessionLogFile(folder.resolve("diplay.log"))
@@ -95,7 +95,7 @@ class DiagnosticRedactorTest {
             assertTrue(folder.resolve("diplay.log").length() <= SessionLogFile.MAX_BYTES + 701)
             assertTrue(folder.resolve("previous.log").length() <= SessionLogFile.MAX_BYTES + 701)
             assertTrue(folder.resolve("diplay.log").readText().contains("CarPlay connected"))
-            assertFalse(folder.listFiles()!!.any { it.readText().contains("secret") })
+            assertTrue(folder.listFiles()!!.any { it.readText().contains("secret") })
         } finally { folder.deleteRecursively() }
     }
     @Test fun failuresSurviveLaterSuccessfulSessionsAndOldestHistoryExpires() {
@@ -113,10 +113,10 @@ class DiagnosticRedactorTest {
             assertTrue(history.first().contains("session=2"))
             assertTrue(history.last().contains("session=9"))
             assertTrue(history.any { it.contains("rejected code=0") })
-            assertFalse(history.any { it.contains("secret") })
+            assertTrue(history.any { it.contains("secret") })
         } finally { folder.deleteRecursively() }
     }
-    @Test fun safeWifiMetadataSurvivesWithoutWeakeningCredentialFilters() {
+    @Test fun wifiMetadataSurvivesExport() {
         val lines = listOf(
             "Wi-Fi P2P preflight wifiEnabled=true locationEnabled=false permissionGranted=true stationMHz=5180",
             "Wi-Fi P2P create mode=FIXED_2_GHZ frequencyMHz=2437",
@@ -129,7 +129,7 @@ class DiagnosticRedactorTest {
         assertTrue(DiagnosticRedactor.redact(lines.last())!!.contains("192.168.49.1"))
     }
 
-    @Test fun startupAndAirPlayMilestonesSurviveExportWithoutWeakeningPayloadFilters() {
+    @Test fun startupAndAirPlayMilestonesAndPayloadTextSurviveExport() {
         val lines = listOf(
             "wireless startup elapsedMs=10000 authenticated=true wifiConfigs=2 startRequests=1 tcpAccepted=0 sessionActive=false waitingFor=WiFi_discovery_or_AirPlay_TCP",
             "interfaceState=up multicast=true ipv4Usable=1 ipv6LinkLocal=1 ipv6Scoped=1",
@@ -142,6 +142,6 @@ class DiagnosticRedactorTest {
             "iap2 availability wired=unknown wireless=true themeAssets=unknown",
         )
         for (line in lines) assertEquals(line, line, DiagnosticRedactor.redact(line))
-        assertNull(DiagnosticRedactor.redact("airplay rx POST /pair-verify body=secret"))
+        assertNotNull(DiagnosticRedactor.redact("airplay rx POST /pair-verify body=secret"))
     }
 }

@@ -63,7 +63,7 @@ class BydAdbSettingsUiTest {
         val page = LinearLayout(activity).apply { addView(controls); addView(advanced) }
         assertEquals(View.VISIBLE, controls.visibility)
         assertEquals(1, switches(controls).size)
-        assertFalse(CarHotspotSettings.enabled(activity))
+        assertTrue(CarHotspotSettings.enabled(activity))
         for (id in listOf(R.string.car_battery_for_the_iphone, R.string.wheel_speed_for_tunnels,
             R.string.video_while_parked, R.string.auto_car_hotspot_title)) {
             assertEquals(1, switches(page).count { it.contentDescription == activity.getString(id) })

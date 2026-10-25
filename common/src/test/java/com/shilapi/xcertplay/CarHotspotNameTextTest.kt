@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import com.shilapi.xcertplay.network.CarHotspotSettings
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -28,6 +29,7 @@ class CarHotspotNameTextTest {
 
     @Before fun setUp() {
         clearSettings()
+        CarHotspotSettings.setEnabled(context, false)
         // The car hotspot is off, as on a head unit that has just been switched on.
         context.sendStickyBroadcast(Intent("android.net.wifi.WIFI_AP_STATE_CHANGED")
             .putExtra("wifi_state", 11).putExtra("wifi_ap_mode", 1))
@@ -40,6 +42,7 @@ class CarHotspotNameTextTest {
     }
 
     private fun clearSettings() {
+        context.getSharedPreferences("diplay_car_hotspot", 0).edit().clear().commit()
         context.getSharedPreferences("diplay", 0).edit().clear().commit()
         context.getSharedPreferences("xcertplay_airplay", 0).edit().clear().commit()
     }

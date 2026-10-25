@@ -297,6 +297,12 @@ class CarPlayVpnService : VpnService() {
                                 }
                             }
 
+                            override fun onAuthenticationResponseSent(session: AirPlaySession) {
+                                if (current.listenerIdentity == null || !internalPeer) {
+                                    current.listener.onAuthenticationResponseSent(session)
+                                }
+                            }
+
                             override fun onSessionActive(session: AirPlaySession) {
                                 if (current.listenerIdentity == null || !internalPeer) current.listener.onSessionActive(session)
                             }
@@ -343,7 +349,7 @@ class CarPlayVpnService : VpnService() {
         synchronized(sessionsLock) {
             sessions.toList().forEach { session ->
                 try {
-                    session.close()
+                    session.closeWithReason("service", "transport detached or replaced")
                 } catch (error: Exception) {
                     Log.w(TAG, "AirPlay session replacement failed", error)
                 }

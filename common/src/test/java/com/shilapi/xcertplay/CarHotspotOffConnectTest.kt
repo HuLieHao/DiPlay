@@ -37,6 +37,7 @@ class CarHotspotOffConnectTest {
 
     @Before fun setUp() {
         clearSettings()
+        CarHotspotSettings.setEnabled(context, false)
         HotspotState.on = false
         AirPlayPersistence.saveWirelessHotspotMode(context, WirelessHotspotMode.MANUAL)
         AirPlayPersistence.saveManualHotspotSsid(context, "Car 5G")

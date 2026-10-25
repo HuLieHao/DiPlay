@@ -5276,9 +5276,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
             override fun onDebugLog(message: String) {
                 if (DiagnosticRedactor.redact(message) == null) return
-                if (message.startsWith(CarPlayController.CONNECTION_DIAGNOSTIC_PREFIX + " ")) {
+                if (ConnectionDiagnosticPolicy.retainAfterGenerationChange(message)) {
                     // Retain old-controller teardown evidence without accepting its UI/session state.
-                    AsyncDiagnosticLog.append(diagnosticLog, message)
+                    AsyncDiagnosticLog.append(diagnosticLog, "controllerGeneration=$controllerGeneration $message")
                     return
                 }
                 runOnUiThread {

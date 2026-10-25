@@ -358,10 +358,35 @@ class CarPlayBonjour(
             workerToJoin = worker
             worker = null
             workerToJoin?.interrupt()
+        }
+        try {
+            // Each family owns a separate JmDNS state machine. Overlap their goodbye waits,
+            // but retain the teardown barrier before a new generation may bind/publish.
+            val closing = ArrayList<Thread>()
+            dnsToClose.forEachIndexed { index, dns ->
+                val thread = runCatching {
+                    Thread({ runCatching { dns.close() } }, "carplay-mdns-close-$index").apply {
+                        isDaemon = true
+                        start()
+                    }
+                }.getOrNull()
+                if (thread != null) closing.add(thread)
+                else runCatching { dns.close() } // Thread creation failure still requires cleanup.
+            }
+            var interrupted = false
+            try {
+                for (thread in closing) {
+                    while (thread.isAlive) {
+                        try { thread.join() } catch (_: InterruptedException) { interrupted = true }
+                    }
+                }
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt()
+            }
+            workerToJoin?.let(::joinWorker)
+        } finally {
             if (multicastLock.isHeld) multicastLock.release()
         }
-        dnsToClose.forEach { dns -> runCatching { dns.close() } }
-        workerToJoin?.let(::joinWorker)
     }
 
     @Suppress("DEPRECATION")

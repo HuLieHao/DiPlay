@@ -26,7 +26,7 @@ class DisplayDiagnosticSnapshotTest {
         assertTrue(report.contains("canvas_dimensions_unsupported"))
     }
 
-    @Test fun actualOutputAndPhoneVersionsSurviveReportRedaction() {
+    @Test fun actualOutputAndPhoneVersionsSurviveReportExport() {
         val attempt = DisplayDiagnosticSnapshot.begin(context, "Display request selected=Smaller",
             "Decoder capability result=supported", "Display effective canvas=2560x1440")
         DisplayDiagnosticSnapshot.record(context, attempt, "Phone display peer model=iPhone11,2 ios=18.7.10 airplay=950.7.1")
@@ -48,13 +48,14 @@ class DisplayDiagnosticSnapshotTest {
         assertEquals(current, DisplayDiagnosticSnapshot.currentAttempt(context))
     }
 
-    @Test fun onlySupportedMetadataIsStoredAndItIsBounded() {
+    @Test fun supportedMetadataRetainsOriginalContentAndRemainsBounded() {
         val attempt = DisplayDiagnosticSnapshot.begin(context, "request", "capability", "effective")
         DisplayDiagnosticSnapshot.record(context, attempt, "payload=secret")
         DisplayDiagnosticSnapshot.record(context, attempt, "Video: output format password=secret")
         DisplayDiagnosticSnapshot.record(context, attempt, "Video: decoder=" + "x".repeat(2000))
         val report = DisplayDiagnosticSnapshot.report(context)
-        assertFalse(report.contains("secret"))
+        assertTrue(report.contains("Video: output format password=secret"))
+        assertFalse(report.contains("payload=secret"))
         assertTrue(report.lines().all { it.length <= 700 })
     }
 }

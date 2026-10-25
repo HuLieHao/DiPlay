@@ -3,7 +3,7 @@ package com.shilapi.xcertplay
 import java.io.Closeable
 import java.io.File
 
-/** Bounded, private diagnostics. Credential/payload lines are excluded before touching storage. */
+/** Bounded, private diagnostics. Captured text is stored without content filtering. */
 internal class SessionLogFile(val file: File) : Closeable {
     private val lock = Any()
     private var closed = false

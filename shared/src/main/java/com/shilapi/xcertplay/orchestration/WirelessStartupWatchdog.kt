@@ -22,6 +22,7 @@ internal class WirelessStartupWatchdog(
     private var firstStartNanos: Long? = null
     private var stageStartedNanos = 0L
     private var lastMilestone: ConnectionMilestone? = null
+    private var authenticationCompleted = false
     private var timerGeneration = 0
     private var cancelTimer: (() -> Unit)? = null
 
@@ -44,6 +45,17 @@ internal class WirelessStartupWatchdog(
     /** Diagnostic observations never renew a deadline, including repeated protocol requests. */
     @Synchronized fun progress(milestone: ConnectionMilestone) {
         if (!terminated && stage != Stage.COMPLETE) lastMilestone = milestone
+    }
+
+    /** One bounded setup window after real authentication, independent of diagnostic events. */
+    @Synchronized fun authenticationResponseSent() {
+        if (terminated || stage != Stage.SESSION || authenticationCompleted) return
+        val atNanos = nowNanos()
+        // A delayed timer callback must not allow authentication to revive an expired window.
+        if ((atNanos - stageStartedNanos) / 1_000_000 >= WirelessStartupPolicy.SESSION_MILLIS) return
+        authenticationCompleted = true
+        log("MFi response sent atNs=$atNanos; allow session setup")
+        arm(Stage.SESSION, atNanos, WirelessStartupPolicy.SESSION_MILLIS)
     }
 
     @Synchronized fun sessionEstablished(): Boolean {

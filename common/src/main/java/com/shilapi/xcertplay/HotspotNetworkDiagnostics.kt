@@ -72,18 +72,15 @@ internal object HotspotNetworkDiagnostics {
         fun section(title: String, raw: String, metadata: String = "") {
             if (text.length >= MAX_CAPTURE_CHARS) return
             val tail = title == "recent-network-log"
-            // Byte-tail can begin after a credential field name. Keep complete raw lines only.
-            val source = if (tail) raw.lineSequence().drop(1) else raw.lineSequence()
-            val safeLines = source.mapNotNull(::sanitize).toList()
-            val selected = if (tail) safeLines.takeLast(1000) else safeLines.take(1000)
+            val lines = raw.lineSequence().toList()
+            val selected = if (tail) lines.takeLast(1000) else lines.take(1000)
             val joined = selected.joinToString("\n")
             val remaining = (MAX_CAPTURE_CHARS - text.length - title.length - metadata.length - 150).coerceAtLeast(0)
             val limit = remaining.coerceAtMost(MAX_SECTION_CHARS)
             val content = if (tail) joined.takeLast(limit) else joined.take(limit)
             text.appendLine("--- $title ---")
             if (metadata.isNotEmpty()) text.appendLine(metadata)
-            if (tail && raw.isNotBlank()) text.appendLine("[first available system-log line omitted: may be partial after byte truncation]")
-            if (safeLines.size > 1000 || joined.length > limit || raw.toByteArray(Charsets.UTF_8).size >= REMOTE_SECTION_BYTES)
+            if (lines.size > 1000 || joined.length > limit || raw.toByteArray(Charsets.UTF_8).size >= REMOTE_SECTION_BYTES)
                 text.appendLine(if (tail) "[truncated; keeping newest available events; first line may be partial]" else "[truncated; showing available prefix]")
             text.appendLine(content)
         }
@@ -94,22 +91,27 @@ internal object HotspotNetworkDiagnostics {
                 "Android API=${Build.VERSION.SDK_INT} board=${Build.BOARD} hardware=${Build.HARDWARE}\n" +
                 "sessionActive=${CarPlayBackgroundSession.active} sessionPresent=${CarPlayBackgroundSession.hasSession()}\n" +
                 connectionState(context) + "\n" +
-                "Original network addresses, names and device identifiers retained. Credential/payload lines excluded.\n" +
+                "Captured text retained without redaction or credential/payload filtering; output size limits apply.\n" +
                 "Read-only receiver snapshot; iPhone internet, routes and actual beacon IEs are NOT measured.")
             val basicAt = SystemClock.elapsedRealtime()
             val basic = runCatching { probe.basic().joinToString("\n") }
             section("app-network", basic.getOrElse { "failure=${it.javaClass.simpleName}: ${it.message}" },
                 "status=${if (basic.isSuccess) "completed" else "failed"} durationMs=${SystemClock.elapsedRealtime() - basicAt}")
             val deadline = SystemClock.elapsedRealtime() + ADB_BUDGET_MILLIS
-            val cancellation = timer.schedule({ runCatching { probe.close() } }, ADB_BUDGET_MILLIS, TimeUnit.MILLISECONDS)
+            val captureExpired = AtomicBoolean()
+            val cancellation = timer.schedule({
+                captureExpired.set(true)
+                runCatching { probe.close() }
+            }, ADB_BUDGET_MILLIS, TimeUnit.MILLISECONDS)
             val connectAt = SystemClock.elapsedRealtime()
             val access = runCatching { probe.connect() }.getOrDefault(LocalAdb.Access.UNREACHABLE)
-            section("local-adb", "access=$access approvalRequested=false durationMs=${SystemClock.elapsedRealtime() - connectAt} budgetMs=$ADB_BUDGET_MILLIS")
+            section("local-adb", "access=$access approvalRequested=false durationMs=${SystemClock.elapsedRealtime() - connectAt} budgetMs=$ADB_BUDGET_MILLIS" +
+                if (captureExpired.get() || SystemClock.elapsedRealtime() >= deadline) " reason=capture_deadline" else "")
             val counts = linkedMapOf<String, Int>()
             for ((name, command) in commands) {
                 val remaining = deadline - SystemClock.elapsedRealtime()
-                if (access != LocalAdb.Access.READY || remaining <= 0) {
-                    val reason = if (access != LocalAdb.Access.READY) "adb_$access" else "capture_deadline"
+                if (access != LocalAdb.Access.READY || remaining <= 0 || captureExpired.get()) {
+                    val reason = if (remaining <= 0 || captureExpired.get()) "capture_deadline" else "adb_$access"
                     section(name, "command=$command", "status=not_sampled reason=$reason")
                     counts["not_sampled"] = (counts["not_sampled"] ?: 0) + 1
                     continue
@@ -122,8 +124,13 @@ internal object HotspotNetworkDiagnostics {
                 val result = runCatching { probe.shell(wrapped, budget) }
                 val raw = result.getOrNull()
                 val exit = raw?.let { Regex("(?m)^${EXIT_MARKER}([0-9]+)\\s*$").find(it)?.groupValues?.get(1)?.toIntOrNull() }
+                val timeoutReason = when {
+                    captureExpired.get() || SystemClock.elapsedRealtime() >= deadline -> "capture_deadline"
+                    result.exceptionOrNull() is SocketTimeoutException -> "command_timeout"
+                    else -> null
+                }
                 val status = when {
-                    result.exceptionOrNull() is SocketTimeoutException -> "timed_out"
+                    timeoutReason != null -> "timed_out"
                     result.isFailure -> "failed"
                     raw == null -> "link_failed"
                     exit == null -> "incomplete_output"
@@ -132,7 +139,8 @@ internal object HotspotNetworkDiagnostics {
                 }
                 counts[status] = (counts[status] ?: 0) + 1
                 val duration = SystemClock.elapsedRealtime() - commandAt
-                val metadata = "status=$status exitCode=${exit ?: "unknown"} durationMs=$duration timeoutMs=$budget"
+                val metadata = "status=$status" + (timeoutReason?.let { " reason=$it" } ?: "") +
+                    " exitCode=${exit ?: "unknown"} durationMs=$duration timeoutMs=$budget"
                 event("section=$name $metadata")
                 val output = raw?.replace(Regex("(?m)^${EXIT_MARKER}[0-9]+\\s*$"), "")
                     ?: result.exceptionOrNull()?.let { "failure=${it.javaClass.simpleName}: ${it.message}" }
@@ -159,9 +167,6 @@ internal object HotspotNetworkDiagnostics {
         CarPlayBackgroundSession.snapshot()?.controller?.connectionDiagnosticSnapshot()
             ?: "transport=${if (AirPlayPersistence.loadWirelessEnabled(context)) "WIRELESS" else "WIRED"} controller=absent stage=not_running"
 
-    private fun sanitize(line: String): String? = if (DiagnosticRedactor.containsCredential(line)) null else
-        line.replace(Regex("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"), "?")
-
     private fun save(context: Context, text: String) = synchronized(storageLock) {
         val folder = File(context.filesDir, DIRECTORY).apply { check(mkdirs() || isDirectory) }
         val latest = AtomicFile(File(folder, files.first()))
@@ -187,7 +192,7 @@ internal object HotspotNetworkDiagnostics {
                 found = true
                 appendLine("--- $name ---")
                 runCatching { AtomicFile(file).openRead().bufferedReader().use { it.readTextBounded() } }.getOrNull()
-                    ?.lineSequence()?.forEach { sanitize(it)?.let(::appendLine) }
+                    ?.let(::appendLine)
             }
             if (!found) appendLine("No capture saved. Use Settings > Diagnostics > Capture hotspot network diagnostics.")
         }
@@ -275,7 +280,7 @@ internal object HotspotNetworkDiagnostics {
                 }
             }, timeoutMillis.toLong(), TimeUnit.MILLISECONDS)
             return try {
-                val result = current.shell(command, timeoutMillis)
+                val result = current.shellForDiagnostics(command, timeoutMillis)
                 if (timedOut.get()) throw SocketTimeoutException("command wall-clock deadline reached")
                 result
             }

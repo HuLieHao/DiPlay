@@ -264,7 +264,7 @@
     <string name="navigation_stream_type">نوع بث الملاحة</string>
     <string name="nearby_devices">الأجهزة القريبة</string>
     <string name="nearby_devices_connects_your_iphone_microphone_enables_sir">«الأجهزة القريبة» تربط iPhone. الميكروفون يمكّن Siri والمكالمات. تتطلب إصدارات Android الأقدم أيضًا الموقع للإعداد اللاسلكي. قد يطلب وضع USB اتصال VPN محلي.</string>
-    <string name="nothing_is_sent_automatically_protocol_payloads_and_creden">لا يُرسل شيء تلقائياً. تُستبعد حمولات البروتوكول وبيانات الاعتماد.</string>
+    <string name="settings_diagnostic_report_raw_content_hint">لا يُرسل شيء تلقائياً. يُحتفظ بمحتوى السجلات المجمّعة دون إخفاء البيانات، مع استمرار حدود الحجم.</string>
     <string name="oem_label">وسم OEM</string>
     <string name="on_your_iphone_open_settings_bluetooth_and_pair_with_the_c">على iPhone، افتح الإعدادات ← البلوتوث واقترن بالسيارة. ثم عد إلى DiPlay واختر «اتصال بالهاتف».</string>
     <string name="one_time_setup_on_this_car">إعداد لمرة واحدة على هذه السيارة</string>

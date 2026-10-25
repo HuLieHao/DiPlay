@@ -271,7 +271,7 @@
     <string name="navigation_stream_type">ナビ音声のストリーム種別</string>
     <string name="nearby_devices">付近のデバイス</string>
     <string name="nearby_devices_connects_your_iphone_microphone_enables_sir">「付近のデバイス」はiPhoneとの接続に、マイクはSiriと通話に必要です。古いAndroidでは無線接続に位置情報権限も必要です。USB接続は別の権限を使用します。</string>
-    <string name="nothing_is_sent_automatically_protocol_payloads_and_creden">データは自動送信されません。通信内容と認証情報は除外されます。</string>
+    <string name="settings_diagnostic_report_raw_content_hint">データは自動送信されません。収集したログはマスキングせずに保持されます。サイズ制限は引き続き適用されます。</string>
     <string name="oem_label">OEM名</string>
     <string name="on_your_iphone_open_settings_bluetooth_and_pair_with_the_c">iPhoneの「設定 → Bluetooth」で車とペアリングしてください。その後DiPlayに戻り、「iPhoneに接続」を選択します。</string>
     <string name="one_time_setup_on_this_car">この車での初期設定</string>

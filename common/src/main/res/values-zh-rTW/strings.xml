@@ -271,7 +271,7 @@
     <string name="navigation_stream_type">導航音訊串流類型</string>
     <string name="nearby_devices">附近的裝置</string>
     <string name="nearby_devices_connects_your_iphone_microphone_enables_sir">「附近的裝置」權限用於連線 iPhone；麥克風權限用於 Siri 和通話。較舊版本的 Android 也需要位置權限來設定無線連線。USB 模式可能會要求建立本機 VPN 連線。</string>
-    <string name="nothing_is_sent_automatically_protocol_payloads_and_creden">報告不會自動傳送，不包含通訊協定資料和認證資訊。</string>
+    <string name="settings_diagnostic_report_raw_content_hint">報告不會自動傳送。已擷取日誌保留原文、不做遮蔽，仍有大小限制。</string>
     <string name="oem_label">OEM 標籤</string>
     <string name="on_your_iphone_open_settings_bluetooth_and_pair_with_the_c">在 iPhone 上開啟「設定 → 藍牙」並與車機配對。然後返回 DiPlay，點一下「連線手機」。</string>
     <string name="one_time_setup_on_this_car">在此車機上進行一次性設定</string>

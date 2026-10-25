@@ -271,7 +271,7 @@
     <string name="navigation_stream_type">Тип аудіопотоку навігації</string>
     <string name="nearby_devices">Пристрої поблизу</string>
     <string name="nearby_devices_connects_your_iphone_microphone_enables_sir">Дозвіл «Пристрої поблизу» потрібен для підключення iPhone. Мікрофон потрібен для Siri та викликів. На старіших версіях Android для бездротового підключення також потрібен доступ до місцезнаходження. Для USB може знадобитися дозвіл на локальне VPN-з’єднання.</string>
-    <string name="nothing_is_sent_automatically_protocol_payloads_and_creden">Нічого не надсилається автоматично. Протокольні дані та облікові дані не включаються.</string>
+    <string name="settings_diagnostic_report_raw_content_hint">Нічого не надсилається автоматично. Зібрані журнали зберігаються без маскування даних; обмеження розміру залишаються.</string>
     <string name="oem_label">Назва OEM</string>
     <string name="on_your_iphone_open_settings_bluetooth_and_pair_with_the_c">На iPhone відкрийте Налаштування → Bluetooth і спарте його з автомобілем. Потім поверніться до DiPlay та виберіть «Підключити телефон».</string>
     <string name="one_time_setup_on_this_car">Одноразове налаштування в цьому автомобілі</string>

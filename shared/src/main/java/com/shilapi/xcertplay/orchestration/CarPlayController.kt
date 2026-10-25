@@ -1764,6 +1764,13 @@ class CarPlayController(
                 }
             }
 
+            override fun onAuthenticationResponseSent(session: AirPlaySession) {
+                if (!isStaleWirelessRun(generation) && !session.isClosed &&
+                    (activeSession == null || activeSession === session)) {
+                    watchdog.authenticationResponseSent()
+                }
+            }
+
             override fun onTcpAccepted(event: AirPlayTcpAccepted) {
                 if (isStaleWirelessRun(generation)) return
                 if (watchdog.accepted(event)) {
@@ -1811,7 +1818,8 @@ class CarPlayController(
             }
 
             override fun onDebugLog(message: String) {
-                if (isStaleWirelessRun(generation)) return
+                if (isStaleWirelessRun(generation) &&
+                    !com.shilapi.xcertplay.ConnectionDiagnosticPolicy.retainAfterGenerationChange(message)) return
                 sessionListener.onDebugLog(message)
             }
 

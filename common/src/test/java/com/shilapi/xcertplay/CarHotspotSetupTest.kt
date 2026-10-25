@@ -26,10 +26,11 @@ class CarHotspotSetupTest {
         context.getSharedPreferences("xcertplay_airplay", 0).edit().clear().commit()
     }
 
-    @Test fun freshInstallAndExistingHotspotConfigurationRemainOptedOut() {
-        assertFalse(CarHotspotSettings.enabled(context))
+    @Test fun defaultAutomaticallyPreparesConfiguredCarHotspot() {
+        assertTrue(CarHotspotSettings.enabled(context))
         configureHotspot()
-        assertFalse(eligible())
+        assertTrue(eligible())
+        assertTrue(CarHotspotSettings.shouldEnable(context, true, WirelessHotspotMode.MANUAL))
     }
 
     @Test fun qualcommBydWithoutNavigationServicesCanReachHotspotSetup() {

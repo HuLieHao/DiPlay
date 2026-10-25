@@ -44,6 +44,7 @@ class CarHotspotSwitchTest {
         for (name in listOf("diplay_byd_outputs", "diplay_byd_vehicle_fields", "diplay_car_hotspot", "xcertplay_airplay", "diplay")) {
             app.getSharedPreferences(name, 0).edit().clear().commit()
         }
+        CarHotspotSettings.setEnabled(app, false)
         BydVehicleFieldStore.clearMemoryForTests()
         CarPlayBackgroundSession.clear()
         CarHotspotAdbGrantTest.WritePermission.allowed = false

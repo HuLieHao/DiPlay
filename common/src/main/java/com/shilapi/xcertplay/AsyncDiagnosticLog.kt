@@ -4,7 +4,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Queued entries retain only their exact file target and a bounded metadata string with original network identifiers. */
+/** Queued entries retain only their exact file target and bounded original diagnostic text. */
 internal object AsyncDiagnosticLog {
     private data class Entry(val target: SessionLogFile, val line: String)
     private val writer = BoundedDiagnosticWriter<Entry> { it.target.append(it.line) }

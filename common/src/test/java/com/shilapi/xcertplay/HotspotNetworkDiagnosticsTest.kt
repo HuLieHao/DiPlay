@@ -27,7 +27,7 @@ class HotspotNetworkDiagnosticsTest {
             val report = activity.javaClass.getDeclaredMethod("diagnosticReportText", Context::class.java)
                 .apply { isAccessible = true }.invoke(activity, context) as String
             assertTrue("Saved network evidence must be in the exported diagnostic report", report.contains("captureMarker=hotspot-snapshot"))
-            assertFalse(report.contains("not-for-export"))
+            assertTrue(report.contains("password=not-for-export"))
         } finally { folder.deleteRecursively() }
     }
     private class Probe(private val access: LocalAdb.Access, private val marker: String = "sample", private val log: String? = null) : HotspotNetworkDiagnostics.Probe {
@@ -56,8 +56,8 @@ class HotspotNetworkDiagnosticsTest {
             assertTrue(report.contains("captureMarker=sample"))
             assertTrue(report.contains("access=NOT_APPROVED"))
             assertTrue(report.contains("approvalRequested=false"))
-            assertFalse(report.contains("secret-one"))
-            assertFalse(report.contains("secret-two"))
+            assertTrue(report.contains("password=secret-one"))
+            assertTrue(report.contains("preSharedKey=secret-two"))
             assertTrue(report.contains("192.168.43.2"))
         } finally { folder.deleteRecursively() }
     }
@@ -74,7 +74,7 @@ class HotspotNetworkDiagnosticsTest {
             assertTrue(report.contains("status=incomplete_output exitCode=unknown"))
             assertTrue(probe.commands.any { it.contains("logcat -d") })
             assertTrue(probe.commands.any { it.contains("ip route show") })
-            assertFalse(report.contains("secret-three"))
+            assertTrue(report.contains("psk=secret-three"))
             assertTrue(probe.closed)
         } finally { folder.deleteRecursively() }
     }
@@ -163,7 +163,7 @@ class HotspotNetworkDiagnosticsTest {
         val client = mock(LocalAdb::class.java)
         val released = CountDownLatch(1)
         doAnswer { released.countDown(); null }.`when`(client).cancelPendingOperations()
-        `when`(client.shell(anyString(), anyInt())).thenAnswer {
+        `when`(client.shellForDiagnostics(anyString(), anyInt())).thenAnswer {
             if (released.await(3, TimeUnit.SECONDS)) null else "busy shell exceeded its deadline"
         }
         type.getDeclaredField("adb").apply { isAccessible = true }.set(probe, client)
@@ -175,14 +175,14 @@ class HotspotNetworkDiagnosticsTest {
         } finally { released.countDown(); probe.close() }
     }
 
-    @Test fun byteClippedLogOmitsPartialFirstLineButRetainsOriginalNetworkIdentifiers() {
+    @Test fun byteClippedLogRetainsFirstAvailableLineAndOriginalNetworkIdentifiers() {
         val context = RuntimeEnvironment.getApplication()
         val folder = File(context.filesDir, "hotspot-network-diagnostics")
         try {
             val probe = Probe(LocalAdb.Access.READY, log = "unlabelled-private-value\nclient=AA:BB:CC:DD:EE:FF ip=192.168.43.2 ssid=Passenger WiFi\ncomplete-network-event")
             assertEquals(HotspotNetworkDiagnostics.Outcome.SAVED, HotspotNetworkDiagnostics.collect(context, probe))
             val saved = File(folder, "latest.txt").readText()
-            assertFalse(saved.contains("unlabelled-private-value"))
+            assertTrue(saved.contains("unlabelled-private-value"))
             assertTrue(saved.contains("client=AA:BB:CC:DD:EE:FF ip=192.168.43.2 ssid=Passenger WiFi"))
             assertTrue(saved.contains("complete-network-event"))
         } finally { folder.deleteRecursively() }
@@ -214,6 +214,68 @@ class HotspotNetworkDiagnosticsTest {
             assertTrue(report.contains("captureCompletedAt="))
             assertTrue(report.contains("commandSummary"))
             assertTrue(report.contains("transport="))
+        } finally { folder.deleteRecursively() }
+    }
+
+
+    @Test fun socketReadTimeoutSurvivesTheAdbLayerBeforeCancellationTimerFires() {
+        val context = RuntimeEnvironment.getApplication()
+        val type = HotspotNetworkDiagnostics::class.java.declaredClasses.single { it.simpleName == "AndroidProbe" }
+        val probe = type.getDeclaredConstructor(Context::class.java).apply { isAccessible = true }
+            .newInstance(context) as HotspotNetworkDiagnostics.Probe
+        val client = LocalAdb(com.shilapi.xcertplay.adb.AdbKeys.load(context))
+        // Inject only the socket I/O boundary; execute the real LocalAdb shell/catch path.
+        val socket = java.net.Socket()
+        val input = object : java.io.InputStream() {
+            override fun read(): Int = throw java.net.SocketTimeoutException("synthetic idle read timeout")
+        }
+        for ((name, value) in listOf("socket" to socket, "input" to input, "output" to java.io.ByteArrayOutputStream()))
+            LocalAdb::class.java.getDeclaredField(name).apply { isAccessible = true }.set(client, value)
+        type.getDeclaredField("adb").apply { isAccessible = true }.set(probe, client)
+        try {
+            val failure = runCatching { probe.shell("read-only-test", 2_000) }.exceptionOrNull()
+            assertTrue("Socket timeout must not become a null/link failure: $failure", failure is java.net.SocketTimeoutException)
+            assertEquals("synthetic idle read timeout", failure?.message)
+        } finally { probe.close(); socket.close() }
+    }
+
+    @Test fun totalCaptureBudgetIsReportedAsTimeoutInsteadOfLinkFailure() {
+        val context = RuntimeEnvironment.getApplication()
+        val folder = File(context.filesDir, "hotspot-network-diagnostics")
+        try {
+            val probe = object : HotspotNetworkDiagnostics.Probe {
+                override fun basic() = emptyList<String>()
+                override fun connect() = LocalAdb.Access.READY
+                override fun shell(command: String, timeoutMillis: Int): String? {
+                    org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofSeconds(21))
+                    return null // Closing the ADB socket at the capture deadline releases its read.
+                }
+                override fun close() {}
+            }
+            assertEquals(HotspotNetworkDiagnostics.Outcome.SAVED, HotspotNetworkDiagnostics.collect(context, probe))
+            val report = HotspotNetworkDiagnostics.report(context)
+            assertTrue(report, report.contains("status=timed_out reason=capture_deadline"))
+            assertFalse(report.contains("status=link_failed"))
+            assertTrue(report.contains("status=not_sampled reason=capture_deadline"))
+        } finally { folder.deleteRecursively() }
+    }
+
+    @Test fun captureAndExportRetainCredentialAndPayloadTextVerbatim() {
+        val context = RuntimeEnvironment.getApplication()
+        val folder = File(context.filesDir, "hotspot-network-diagnostics")
+        val lines = listOf("password=synthetic", "wpa_passphrase=synthetic", "wpa_psk=synthetic",
+            "mPassphrase=synthetic", "{\"password\":\"synthetic\"}", "TRACE payload=synthetic", "PHONE body=synthetic")
+        try {
+            val probe = Probe(LocalAdb.Access.READY, log = lines.joinToString("\n"))
+            assertEquals(HotspotNetworkDiagnostics.Outcome.SAVED, HotspotNetworkDiagnostics.collect(context, probe))
+            val saved = File(folder, "latest.txt").readText()
+            val activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
+            val report = activity.javaClass.getDeclaredMethod("diagnosticReportText", Context::class.java)
+                .apply { isAccessible = true }.invoke(activity, context) as String
+            for (line in lines) {
+                assertTrue("Missing stored line: $line", saved.contains(line))
+                assertTrue("Missing exported line: $line", report.contains(line))
+            }
         } finally { folder.deleteRecursively() }
     }
 
