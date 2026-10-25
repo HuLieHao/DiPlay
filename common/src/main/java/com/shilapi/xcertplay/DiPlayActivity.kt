@@ -2546,7 +2546,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 page = backupPageHtml(),
                 export = { SettingsBackupCodec.export(this, version()) },
                 import = { SettingsBackupCodec.import(this, it) },
-                report = { diagnosticReportText(applicationContext).toByteArray(Charsets.UTF_8) },
+                reportFile = { diagnosticReportFile(applicationContext) },
                 codePage = assets.open("settings-code.html").use { it.readBytes() },
             )
             created.onCodeEntryClosed = {
@@ -5974,7 +5974,23 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     /** The text of a diagnostic report. It reads the session logs, so call it off the main thread. */
     private fun diagnosticReportText(appContext: Context): String = buildString {
+        writeDiagnosticReport(appContext, this)
+    }
+
+    private fun diagnosticReportFile(appContext: Context): File {
+        val info = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+        val code = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info)
+        return DiagnosticReportFile.create(File(appContext.cacheDir, "phone-reports"), code) {
+            writeDiagnosticReport(appContext, it)
+        }
+    }
+
+    /** Both export paths share the same content; the phone path never builds the whole report in memory. */
+    private fun writeDiagnosticReport(appContext: Context, output: Appendable) = with(output) {
+        val pendingFlushed = AsyncDiagnosticLog.awaitIdle(2_000)
         appendLine("BuickPlay ${version()} · private beta diagnostic report")
+        appendLine("Diagnostic writer flush: ${if (pendingFlushed) "completed" else "timed_out; pending tail may be missing"}")
+        appendLine("Export consistency: live files; concurrent log rotation may affect this snapshot")
         appendLine(DiagnosticBuildInfo.report(appContext))
         appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
         appendLine("Head unit: ${Build.MANUFACTURER} ${Build.MODEL}")

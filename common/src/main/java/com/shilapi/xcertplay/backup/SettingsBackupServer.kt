@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.backup
 
 import com.shilapi.xcertplay.airplay.RtspMessage
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.net.Inet4Address
 import java.net.InetSocketAddress
@@ -18,6 +19,7 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class SettingsBackupEndpoint(val port: Int, val token: String, val code: String = "") {
     fun url(address: String) = "http://$address:$port/b/$token/"
@@ -41,12 +43,15 @@ class SettingsBackupServer(
     private val report: (() -> ByteArray)? = null,
     /** The page that asks for the typed code, or null when the address cannot be typed. */
     private val codePage: ByteArray? = null,
+    /** Creates a unique immutable snapshot; this server owns and deletes it after the transfer. */
+    private val reportFile: (() -> File)? = null,
 ) {
     private var server: ServerSocket? = null
     private var thread: Thread? = null
     private var connections: ExecutorService? = null
     private val open: MutableSet<Socket> = Collections.newSetFromMap(ConcurrentHashMap())
     private val answering = Any()
+    private val reportInFlight = AtomicBoolean()
     private var token: String = ""
     private var code: String = ""
     @Volatile private var wrongCodes = 0
@@ -160,6 +165,11 @@ class SettingsBackupServer(
                 it.soTimeout = 10_000
                 it.tcpNoDelay = true
                 val request = readRequest(it.getInputStream()) ?: return
+                if (reportFile != null && request.method == "GET" &&
+                    request.path.substringBefore('?').trimEnd('/') == "/b/$token/report") {
+                    serveReportFile(it, request)
+                    return
+                }
                 // A failure while preparing the answer is told to the browser; without an answer it
                 // would show a connection that opened and then gave nothing.
                 val (status, headers, body) = synchronized(answering) {
@@ -180,6 +190,43 @@ class SettingsBackupServer(
                     flush()
                 }
             }
+        }
+    }
+
+    private fun serveReportFile(socket: Socket, request: RtspMessage.Request) {
+        fun error(status: Int, message: String) {
+            socket.getOutputStream().apply {
+                write(RtspMessage.buildResponse(request, RtspMessage.Response(
+                    protocol = "HTTP/1.1", status = status,
+                    headers = mapOf("Content-Type" to "text/plain; charset=utf-8",
+                        "Cache-Control" to "no-store", "Connection" to "close"),
+                    body = message.toByteArray(Charsets.UTF_8),
+                )))
+                flush()
+            }
+        }
+        if (!reportInFlight.compareAndSet(false, true)) {
+            error(503, "A report is already being prepared or downloaded. Try again after it finishes.")
+            return
+        }
+        var file: File? = null
+        var headersStarted = false
+        try {
+            val snapshot = checkNotNull(reportFile).invoke()
+            file = snapshot
+            check(snapshot.isFile) { "Report snapshot is not a file" }
+            if (closed || socket.isClosed) return
+            snapshot.inputStream().use { input ->
+                FileReportResponse.write(input, socket.getOutputStream().buffered(32 * 1024),
+                    input.channel.size(), snapshot.name) { headersStarted = true }
+            }
+        } catch (failure: Exception) {
+            // Once headers have started, closing the socket is the only valid failure response.
+            if (!headersStarted && !closed && !socket.isClosed)
+                error(500, "The head unit could not prepare this report. Try again.")
+        } finally {
+            runCatching { file?.takeIf { it.isFile }?.delete() }
+            reportInFlight.set(false)
         }
     }
 
