@@ -17,6 +17,7 @@ internal class DiagnosticArchive(
     private val detailBudget: Long = 128L * 1024 * 1024,
     private val reserve: Long = 32L * 1024 * 1024,
     private val partBytes: Long = 512L * 1024,
+    private val usableSpace: () -> Long = { root.usableSpace },
 ) {
     private val directory = File(root, "archive")
     private var current: String? = null
@@ -29,15 +30,17 @@ internal class DiagnosticArchive(
     private var attempt = "unknown"
     private var detailBytes = 0L
     private var summaryBytes = 0L
+    private val invalidClockRecorded = mutableSetOf<String>()
 
     fun start(reason: String): String = synchronized(lock) {
         directory.mkdirs()
         migrateLegacy()
         val id = UUID.randomUUID().toString()
         current = id; parts[id] = 0
-        val metadata = "session=$id process=$processId wallMs=${wall()} timezone=${TimeZone.getDefault().id} monotonicMs=${monotonic()} clockValid=$clockValid reason=$reason\n"
-        File(directory, "$id.meta").writeText(metadata)
-        File(directory, "$id.summary").writeText(metadata + "Tail durability: asynchronous queue; sudden process/power loss may lose queued or filesystem-buffered tail.\n")
+        val metadata = "session=$id process=$processId wallMs=${wall()} timezone=${TimeZone.getDefault().id} monotonicMs=${monotonic()} clockValid=$clockValid reason=${reason.take(1024)}\n"
+        writeAdmitted(File(directory, "$id.meta"), metadata.toByteArray())
+        if (!clockValid) invalidClockRecorded.add(id)
+        summary(id, metadata + "Tail durability: asynchronous queue; sudden process/power loss may lose queued or filesystem-buffered tail.")
         cleanup()
         id
     }
@@ -49,19 +52,23 @@ internal class DiagnosticArchive(
         val delta = now - lastWall - (mono - lastMono)
         if (!validWall(now) || kotlin.math.abs(delta) > 300_000 || now < lastWall) {
             clockValid = false
-            File(directory, "$session.meta").appendText("clockValid=false clock_jump=true\n")
-            summary(session, "clock_jump wallMs=$now previousWallMs=$lastWall monotonicMs=$mono dateSelectionUnreliable=true")
-        }
-        lastWall = now; lastMono = mono
-        if (directory.usableSpace < reserve) {
-            cleanup(force = true)
-            if (directory.usableSpace < reserve) {
-                event("detail_dropped low_space session=$session")
-                return@synchronized
+            if (invalidClockRecorded.add(session)) {
+                val meta = File(directory, "$session.meta")
+                if (meta.length() < MAX_METADATA_BYTES)
+                    writeAdmitted(meta, "clockValid=false clock_jump=true\n".toByteArray(), append = true)
+                summary(session, "clock_jump wallMs=$now previousWallMs=$lastWall monotonicMs=$mono dateSelectionUnreliable=true")
             }
         }
+        lastWall = now; lastMono = mono
         val text = original.take(MAX_LINE_CHARS) + if (original.length > MAX_LINE_CHARS) " [truncated oversized line]\n" else "\n"
         val bytes = text.toByteArray(Charsets.UTF_8)
+        // Summary admission is independent: detail pins/budget must never suppress critical events.
+        if (isSummary(original)) summary(session, "wallMs=$now monotonicMs=$mono $text")
+        if (!hasSpace(bytes.size.toLong())) cleanup(spaceNeeded = bytes.size.toLong())
+        if (!hasSpace(bytes.size.toLong())) {
+            event("detail_dropped low_space session=$session")
+            return@synchronized
+        }
         if (detailBytes + bytes.size > detailBudget) {
             cleanup(detailLimit = (detailBudget - bytes.size).coerceAtLeast(0))
             if (detailBytes + bytes.size > detailBudget) {
@@ -73,19 +80,31 @@ internal class DiagnosticArchive(
         val rotated = file.length() + bytes.size > partBytes && file.length() > 0
         if (rotated) { parts[session] = (parts[session] ?: 0) + 1; file = detail(session) }
         try {
-            file.appendBytes(bytes)
+            if (!writeAdmitted(file, bytes, append = true)) { event("detail_dropped low_space session=$session"); return@synchronized }
             detailBytes += bytes.size
-            if (isSummary(original)) summary(session, "wallMs=$now monotonicMs=$mono $text")
             if (isException(original) && (lastException == Long.MIN_VALUE || mono - lastException >= 60_000)) {
-                lastException = mono
-                val context = File(directory, "$session-${UUID.randomUUID()}.exception")
-                context.outputStream().use { output ->
-                    output.write("session=$session process=$processId wallMs=$now monotonicMs=$mono exceptionContext=last64KiB\n".toByteArray())
-                    file.inputStream().use { input -> input.skip((file.length() - 64 * 1024).coerceAtLeast(0)); input.copyTo(output, 8192) }
-                }
+                val header = "session=$session process=$processId wallMs=$now monotonicMs=$mono exceptionContext=last64KiB\n".toByteArray()
+                val contextBytes = minOf(file.length(), 64L * 1024)
+                if (hasSpace(header.size + contextBytes)) {
+                    lastException = mono
+                    val context = File(directory, "$session-${UUID.randomUUID()}.exception")
+                    context.outputStream().use { output ->
+                        output.write(header)
+                        file.inputStream().use { input -> input.skip(file.length() - contextBytes); input.copyTo(output, 8192) }
+                    }
+                } else event("exception_dropped low_space session=$session")
             }
             if (rotated || lastCleanup == Long.MIN_VALUE || mono - lastCleanup > 60_000) { cleanup(); lastCleanup = mono }
         } catch (failure: IOException) { event("write_failed session=$session type=${failure.javaClass.simpleName} partial_tail_possible=true") }
+    }
+
+    fun appendLegacyMirror(file: File, text: String) = synchronized(lock) {
+        if (!writeAdmitted(file, text.toByteArray(Charsets.UTF_8), append = true))
+            event("legacy_mirror_dropped low_space file=${file.name}")
+    }
+    fun rotateLegacyMirror(source: File, destination: File) = synchronized(lock) {
+        if (hasSpace(source.length())) source.copyTo(destination, overwrite = true)
+        else event("legacy_rotation_dropped low_space file=${source.name}")
     }
 
     fun correlation(): String = synchronized(lock) { "process=$processId session=${current ?: "none"} attempt=$attempt wallMs=${wall()} monotonicMs=${monotonic()} timezone=${TimeZone.getDefault().id} clockValid=$clockValid" }
@@ -103,10 +122,12 @@ internal class DiagnosticArchive(
             else -> current ?: start("manual_network_capture")
         }
         if (!File(directory, "$id.meta").isFile)
-            File(directory, "$id.meta").writeText("session=$id wallMs=0 clockValid=false reason=capture_start_metadata_unavailable\n")
+            writeAdmitted(File(directory, "$id.meta"), "session=$id wallMs=0 clockValid=false reason=capture_start_metadata_unavailable\n".toByteArray())
         val file = File(directory, "$id-${UUID.randomUUID()}.network")
-        file.writeText("captureId=$captureId captureSession=$id captureEnd ${correlation()}\n" + text.take(640 * 1024))
+        val bytes = ("captureId=$captureId captureSession=$id captureEnd ${correlation()}\n" + text.take(640 * 1024)).toByteArray(Charsets.UTF_8)
+        if (!writeAdmitted(file, bytes)) { event("capture_dropped low_space captureId=$captureId session=$id"); return@synchronized false }
         cleanup()
+        true
     }
 
     /** Pins a fixed byte prefix of each selected file; cleanup cannot unlink it until ZIP completion. */
@@ -124,8 +145,8 @@ internal class DiagnosticArchive(
                     selection == "all" -> true
                     selection.matches(sessionPattern) -> meta.nameWithoutExtension == selection
                     else -> {
-                        val time = Regex("wallMs=(\\d+)").find(meta.readText())?.groupValues?.get(1)?.toLongOrNull()
-                        !meta.readText().contains("clockValid=false") && time != null && inRange(time, selection, cutoff)
+                        val time = Regex("wallMs=(\\d+)").find(readMetadata(meta))?.groupValues?.get(1)?.toLongOrNull()
+                        !readMetadata(meta).contains("clockValid=false") && time != null && inRange(time, selection, cutoff)
                     }
                 }
             }.map { it.nameWithoutExtension }.toSet()
@@ -175,7 +196,7 @@ internal class DiagnosticArchive(
 
     fun sessions(): List<Pair<String, String>> = synchronized(lock) {
         directory.listFiles().orEmpty().filter { it.extension == "meta" }.sortedByDescending { it.lastModified() }
-            .map { it.nameWithoutExtension to it.readText().lineSequence().first().take(512) }
+            .map { it.nameWithoutExtension to readMetadata(it).lineSequence().first().take(512) }
     }
 
     private fun migrateLegacy() {
@@ -186,12 +207,26 @@ internal class DiagnosticArchive(
             .filter { it.isFile && it.name in setOf("latest.txt", "previous-1.txt", "previous-2.txt") }
         if (legacy.isNotEmpty() || networks.isNotEmpty()) {
             val id = UUID.randomUUID().toString()
-            File(directory, "$id.meta").writeText("session=$id process=legacy wallMs=0 clockValid=false reason=legacy_migration unknown_original_dates=true\n")
-            File(directory, "$id.summary").writeText("Legacy retained logs migrated unchanged; dates and original session boundaries unknown; choose all or session.\n")
-            legacy.forEach { it.copyTo(File(directory, "$id-legacy-${it.name}")) }
-            networks.forEach { it.copyTo(File(directory, "$id-legacy-${it.nameWithoutExtension}.network")) }
+            writeTextAdmitted(File(directory, "$id.meta"), "session=$id process=legacy wallMs=0 clockValid=false reason=legacy_migration unknown_original_dates=true\n")
+            writeTextAdmitted(File(directory, "$id.summary"), "Legacy retained logs migrated unchanged; dates and original session boundaries unknown; choose all or session.\n")
+            legacy.forEach { if (hasSpace(it.length())) it.copyTo(File(directory, "$id-legacy-${it.name}")) else event("legacy_migration_dropped low_space file=${it.name}") }
+            networks.forEach { if (hasSpace(it.length())) it.copyTo(File(directory, "$id-legacy-${it.nameWithoutExtension}.network")) else event("legacy_migration_dropped low_space file=${it.name}") }
         }
-        marker.writeText("Legacy migration completed; original legacy files retained.\n")
+        writeTextAdmitted(marker, "Legacy migration completed; original legacy files retained.\n")
+    }
+
+    private fun hasSpace(bytes: Long): Boolean = bytes >= 0 && usableSpace() - bytes >= reserve
+    private fun writeAdmitted(file: File, bytes: ByteArray, append: Boolean = false): Boolean {
+        if (!hasSpace(bytes.size.toLong())) return false
+        file.outputStreamIf(append).use { it.write(bytes) }
+        return true
+    }
+    private fun File.outputStreamIf(append: Boolean) = java.io.FileOutputStream(this, append)
+    private fun writeTextAdmitted(file: File, text: String) = writeAdmitted(file, text.toByteArray(Charsets.UTF_8))
+    private fun readMetadata(file: File): String {
+        val bytes = ByteArray(MAX_METADATA_BYTES)
+        val count = file.inputStream().use { input -> var total = 0; while (total < bytes.size) { val n = input.read(bytes, total, bytes.size - total); if (n < 0) break; total += n }; total }
+        return String(bytes, 0, count, Charsets.UTF_8) + if (file.length() > MAX_METADATA_BYTES) "\nclockValid=false oversized_legacy_metadata=true" else ""
     }
 
     private fun detail(session: String) = File(directory, "$session-$processId-${(parts[session] ?: 0).toString().padStart(6, '0')}.log")
@@ -203,25 +238,25 @@ internal class DiagnosticArchive(
         val bytes = value.toByteArray(Charsets.UTF_8)
         if (summaryBytes + bytes.size > 4L * 1024 * 1024) cleanup(summaryLimit = 4L * 1024 * 1024 - bytes.size)
         if (summaryBytes + bytes.size > 4L * 1024 * 1024) { event("summary_dropped pinned_budget session=$session"); return }
-        file.appendBytes(bytes)
+        if (!writeAdmitted(file, bytes, append = true)) { event("summary_dropped low_space session=$session"); return }
         summaryBytes += bytes.size
     }
     private fun event(text: String) { runCatching {
         val file = File(directory, "maintenance.txt")
         if (file.length() > 64 * 1024 && file.absolutePath in pins) return@runCatching
-        if (file.length() > 64 * 1024) file.writeText("maintenance_rotated oldest_events_removed=true\n")
-        file.appendText("wallMs=${wall()} $text\n")
+        val value = if (file.length() > 64 * 1024) "maintenance_rotated oldest_events_removed=true\nwallMs=${wall()} $text\n" else "wallMs=${wall()} $text\n"
+        writeAdmitted(file, value.toByteArray(), append = file.length() <= 64 * 1024)
     } }
-    private fun cleanup(force: Boolean = false, detailLimit: Long = detailBudget, summaryLimit: Long = 4L * 1024 * 1024) {
+    private fun cleanup(detailLimit: Long = detailBudget, summaryLimit: Long = 4L * 1024 * 1024, spaceNeeded: Long = 0) {
         val all = directory.listFiles().orEmpty().filter { it.isFile }.sortedBy { it.lastModified() }
         fun prune(extension: String, budget: Long, days: Int, count: Int = Int.MAX_VALUE) {
             val files = all.filter { it.extension == extension }; var bytes = files.sumOf { it.length() }; var size = files.size
             for (file in files) {
                 val meta = File(directory, file.name.take(36) + ".meta")
-                val metadata = if (meta.isFile) meta.readText() else ""
+                val metadata = if (meta.isFile) readMetadata(meta) else ""
                 val created = Regex("wallMs=(\\d+)").find(metadata)?.groupValues?.get(1)?.toLongOrNull()
                 val expired = clockValid && !metadata.contains("clockValid=false") && validWall(wall()) && created != null && wall() >= created && wall() - created > days * DAY
-                if ((force || expired || bytes > budget || size > count) && file.absolutePath !in pins) {
+                if ((expired || bytes > budget || size > count || extension == "log" && spaceNeeded > 0 && !hasSpace(spaceNeeded)) && file.absolutePath !in pins) {
                     val length = file.length()
                     if (file.delete()) {
                         if (extension == "log") {
@@ -244,6 +279,7 @@ internal class DiagnosticArchive(
             if (directory.listFiles().orEmpty().none { it != meta && it.name.startsWith(meta.nameWithoutExtension) }) meta.delete()
         }
         parts.keys.removeAll { it != current && !File(directory, "$it.meta").isFile }
+        invalidClockRecorded.removeAll { it != current && !File(directory, "$it.meta").isFile }
     }
     private fun inRange(time: Long, selection: String, now: Long): Boolean {
         val calendar = Calendar.getInstance().apply { timeInMillis = now; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
@@ -258,6 +294,7 @@ internal class DiagnosticArchive(
         private val sessionPattern = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         private val ranges = setOf("today", "yesterday", "7days", "all")
         private const val DAY = 86_400_000L
+        private const val MAX_METADATA_BYTES = 4096
         private const val MAX_LINE_CHARS = 64 * 1024
         private fun validWall(time: Long) = time in 1_577_836_800_000L..4_102_444_800_000L
         private fun isSummary(text: String) = text.contains("DIAGNOSTIC_QUEUE") || text.contains("CONNECTION_DIAGNOSTIC") || text.contains("session", true) || isException(text) || text.contains("first", true) || text.contains("retry", true) || text.contains("stat", true)

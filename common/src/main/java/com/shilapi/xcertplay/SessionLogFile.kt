@@ -29,7 +29,7 @@ internal class SessionLogFile(val file: File) : Closeable {
                 file.writeText("")
             }
             val mirror = if (safe.length <= 700) safe else safe.take(655) + " [truncated legacy mirror; see session archive]"
-            file.appendText(mirror + "\n")
+            archive.appendLegacyMirror(file, mirror + "\n")
         }
         Unit
     }
@@ -38,9 +38,9 @@ internal class SessionLogFile(val file: File) : Closeable {
         for (index in ARCHIVE_NAMES.lastIndex downTo 1) {
             val source = File(file.parentFile, ARCHIVE_NAMES[index - 1])
             val destination = File(file.parentFile, ARCHIVE_NAMES[index])
-            if (source.exists()) source.copyTo(destination, overwrite = true)
+            if (source.exists()) archive.rotateLegacyMirror(source, destination)
         }
-        file.copyTo(File(file.parentFile, ARCHIVE_NAMES.first()), overwrite = true)
+        archive.rotateLegacyMirror(file, File(file.parentFile, ARCHIVE_NAMES.first()))
     }
     override fun close() = synchronized(lock) {
         if (!closed) session?.let { archive.append(it, "session_closed reason=writer_closed") }

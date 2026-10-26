@@ -26,9 +26,26 @@ internal object DiagnosticExportStore {
         val savedPath: String? = null,
     )
 
-    private class Source(val open: () -> java.io.InputStream, val length: Long)
+    private class Source(val open: () -> java.io.InputStream, val length: Long, val available: (() -> Long)? = null)
     private fun source(report: String) = Source({ report.byteInputStream(Charsets.UTF_8) }, report.toByteArray(Charsets.UTF_8).size.toLong())
-    private fun source(report: File) = Source({ report.inputStream() }, report.length())
+    private fun source(report: File) = Source({ report.inputStream() }, report.length(), { report.usableSpace })
+
+    internal fun copyWithReserve(input: java.io.InputStream, output: java.io.OutputStream, length: Long,
+        available: () -> Long, reserve: Long = 32L * 1024 * 1024) {
+        if (available() - length < reserve) throw IOException("Insufficient space for report copy and diagnostic reserve")
+        val buffer = ByteArray(32 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            if (available() - count < reserve) throw IOException("Diagnostic reserve reached while copying report")
+            output.write(buffer, 0, count)
+        }
+    }
+    private fun copy(report: Source, output: java.io.OutputStream) = report.open().use { input ->
+        val available = report.available
+        if (available == null) input.copyTo(output, 32 * 1024)
+        else copyWithReserve(input, output, report.length, available)
+    }
 
     fun saveWithoutPicker(context: Context, fileName: String, report: String) = saveWithoutPicker(context, fileName, source(report))
     fun saveWithoutPicker(context: Context, fileName: String, report: File) = saveWithoutPicker(context, fileName, source(report))
@@ -89,7 +106,7 @@ internal object DiagnosticExportStore {
         val suffix = if (fileName.endsWith(".zip")) ".zip" else ".txt"
         val file = File.createTempFile(fileName.removeSuffix(suffix) + "-", suffix, directory)
         try {
-            report.open().use { input -> file.outputStream().use { output -> input.copyTo(output, 32 * 1024) } }
+            file.outputStream().use { output -> copy(report, output) }
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.diagnostic-reports", file)
             // Retain only the newest eight reports; never prune the export being returned.
             directory.listFiles()?.filter { it != file && it.isFile }
@@ -126,7 +143,7 @@ internal object DiagnosticExportStore {
         var copy = 1
         while (file.exists()) file = File(directory, "$base-${copy++}$suffix")
         try {
-            report.open().use { input -> file.outputStream().use { output -> input.copyTo(output, 32 * 1024) } }
+            file.outputStream().use { output -> copy(report, output) }
             if (file.length() == 0L && report.length > 0) throw IOException("Downloads/DiPlay did not keep the report")
         } catch (error: Exception) {
             file.delete()
@@ -182,6 +199,6 @@ internal object DiagnosticExportStore {
     private fun write(resolver: ContentResolver, uri: Uri, report: Source) {
         val stream = resolver.openOutputStream(uri, "wt")
             ?: throw IOException("Report destination is unavailable")
-        stream.use { output -> report.open().use { input -> input.copyTo(output, 32 * 1024) } }
+        stream.use { output -> copy(report, output) }
     }
 }

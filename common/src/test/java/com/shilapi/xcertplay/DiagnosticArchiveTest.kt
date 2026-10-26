@@ -6,6 +6,63 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DiagnosticArchiveTest {
+    @Test fun legacyMirrorsCannotBypassReserveAdmission() {
+        val root = Files.createTempDirectory("mirror-reserve").toFile()
+        try {
+            val source = root.resolve("source.log").apply { writeText("x".repeat(512)) }
+            var capacity = 1_000_000L
+            fun used() = root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            val archive = DiagnosticArchive(root, reserve = 1000, usableSpace = { capacity - used() })
+            archive.start("trip")
+            capacity = used() + 1100
+            val mirror = root.resolve("mirror.log")
+            archive.appendLegacyMirror(mirror, "x".repeat(512))
+            archive.rotateLegacyMirror(source, root.resolve("rotated.log"))
+            assertFalse(mirror.exists()); assertFalse(root.resolve("rotated.log").exists())
+            assertTrue(capacity - used() >= 1000)
+        } finally { root.deleteRecursively() }
+    }
+    @Test fun repeatedInvalidClockDoesNotGrowMetadataPerEntry() {
+        val root = Files.createTempDirectory("invalid-clock-bounded").toFile()
+        try {
+            val archive = DiagnosticArchive(root, wall = { 0L }, reserve = 0)
+            val id = archive.start("invalid date")
+            val before = root.resolve("archive/$id.meta").length()
+            repeat(2000) { archive.append(id, "original event") }
+            assertEquals(before, root.resolve("archive/$id.meta").length())
+            assertTrue(archive.sessions().single().second.contains("clockValid=false"))
+        } finally { root.deleteRecursively() }
+    }
+    @Test fun criticalSummarySurvivesPinnedDetailBudgetDrop() {
+        val root = Files.createTempDirectory("pinned-summary").toFile()
+        @Suppress("UNCHECKED_CAST")
+        val pins = DiagnosticArchive::class.java.getDeclaredField("pins").apply { isAccessible = true }.get(null) as MutableMap<String, Int>
+        try {
+            val archive = DiagnosticArchive(root, detailBudget = 300, reserve = 0)
+            val id = archive.start("trip"); archive.append(id, "x".repeat(250))
+            val detail = root.resolve("archive").listFiles()!!.single { it.extension == "log" }
+            pins[detail.absolutePath] = 1
+            archive.append(id, "CONNECTION_DIAGNOSTIC retry disconnect reason=link_lost")
+            assertTrue(root.resolve("archive/$id.summary").readText().contains("reason=link_lost"))
+            assertEquals(251, detail.length())
+        } finally { pins.keys.removeAll { it.startsWith(root.absolutePath) }; root.deleteRecursively() }
+    }
+    @Test fun reserveAdmissionIncludesIncomingDetailAndCaptureHeaders() {
+        val root = Files.createTempDirectory("reserve-admission").toFile()
+        try {
+            var capacity = 1_000_000L
+            fun used() = root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            val archive = DiagnosticArchive(root, reserve = 1000, usableSpace = { capacity - used() })
+            val id = archive.start("trip")
+            capacity = used() + 1512
+            archive.append(id, "x".repeat(512))
+            assertFalse(root.resolve("archive").listFiles()!!.any { it.extension == "log" })
+            capacity = used() + 1512
+            archive.capture("x".repeat(512), "capture", id)
+            assertFalse(root.resolve("archive").listFiles()!!.any { it.extension == "network" })
+            assertTrue(capacity - used() >= 1000)
+        } finally { root.deleteRecursively() }
+    }
     @Test fun captureRemainsAttachedToItsStartingSessionAcrossReconnect() {
         val root = Files.createTempDirectory("capture-reconnect").toFile()
         try {
@@ -65,7 +122,7 @@ class DiagnosticArchiveTest {
         try {
             val low = DiagnosticArchive(root, reserve = Long.MAX_VALUE)
             val lowId = low.start("low space"); low.append(lowId, "evidence cannot fit")
-            assertTrue(root.resolve("archive/maintenance.txt").readText().contains("detail_dropped low_space"))
+            assertFalse(root.resolve("archive").listFiles().orEmpty().any { it.extension == "log" })
             var mono = 0L
             val archive = DiagnosticArchive(root, monotonic = { mono }, reserve = 0)
             val id = archive.start("failures")

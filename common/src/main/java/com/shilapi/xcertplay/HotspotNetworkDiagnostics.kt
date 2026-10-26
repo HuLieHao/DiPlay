@@ -157,7 +157,8 @@ internal object HotspotNetworkDiagnostics {
                 "Config/lease probes use known candidate paths only; unavailable files, permissions or tools do not prove absent capability.\n" +
                 "Compare captures while connecting and running. Record iPhone internet tests separately. Original identifiers are retained.")
             save(context, text.toString())
-            archive.capture(text.toString(), captureId, correlation.substringAfter("session=").substringBefore(" "))
+            if (!archive.capture(text.toString(), captureId, correlation.substringAfter("session=").substringBefore(" ")))
+                throw java.io.IOException("Network capture archive could not preserve storage reserve")
             event("capture_saved durationMs=${SystemClock.elapsedRealtime() - started}")
             Outcome.SAVED
         } catch (error: Exception) {
@@ -172,6 +173,10 @@ internal object HotspotNetworkDiagnostics {
 
     private fun save(context: Context, text: String) = synchronized(storageLock) {
         val folder = File(context.filesDir, DIRECTORY).apply { check(mkdirs() || isDirectory) }
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        val rotationBytes = files.dropLast(1).sumOf { File(folder, it).length() }
+        if (folder.usableSpace - bytes.size - rotationBytes < 32L * 1024 * 1024)
+            throw java.io.IOException("Insufficient space for capture/rotation and diagnostic reserve")
         val latest = AtomicFile(File(folder, files.first()))
         if (File(folder, files.first()).exists() || File(folder, files.first() + ".bak").exists()) latest.openRead().close()
         for (i in files.lastIndex downTo 1) {
@@ -180,7 +185,7 @@ internal object HotspotNetworkDiagnostics {
         }
         val file = AtomicFile(File(folder, files.first()))
         val stream = file.startWrite()
-        try { stream.write(text.toByteArray(Charsets.UTF_8)); file.finishWrite(stream) }
+        try { stream.write(bytes); file.finishWrite(stream) }
         catch (error: Exception) { file.failWrite(stream); throw error }
     }
 

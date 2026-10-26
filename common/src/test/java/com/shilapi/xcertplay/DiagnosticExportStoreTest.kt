@@ -32,6 +32,16 @@ class DiagnosticExportStoreTest {
         ShadowContentResolver.registerProviderInternal("media", provider)
     }
 
+    @Test fun localCopyRejectsInsufficientReserveBeforeWritingAndKeepsItOnSuccess() {
+        val bytes = ByteArray(70_000) { 42 }
+        val output = java.io.ByteArrayOutputStream()
+        assertThrows(IOException::class.java) {
+            DiagnosticExportStore.copyWithReserve(bytes.inputStream(), output, bytes.size.toLong(), { 70_999L }, 1000)
+        }
+        assertEquals(0, output.size())
+        DiagnosticExportStore.copyWithReserve(bytes.inputStream(), output, bytes.size.toLong(), { 71_000L - output.size() }, 1000)
+        assertArrayEquals(bytes, output.toByteArray())
+    }
     @Test fun zipFileIsStreamedToDownloadsWithoutTextConversion() {
         val file = File.createTempFile("report", ".zip")
         try {
