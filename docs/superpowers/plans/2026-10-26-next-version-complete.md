@@ -40,11 +40,11 @@
 - [x] Add one-entry icon preparation cache keyed by immutable input content (and sizing version) to avoid repeated decoding/resizing on reconnect; changed/replaced custom icon invalidates it. Test warm reuse, invalidation, invalid input and bounded ownership. Do not cache dynamic whole /info. Audit C01–C15 in connection-performance document, distinguish implemented instrumentation from unproven physical optimizations.
 - [x] Verify existing cold-start receiver and wake events, add non-destructive hooks when supported; record unsupported vendor behavior. Run focused/full CI, commit and report.
 
-### Task 3: task identity, driver UI, phone state and clock (N03/N09/N11/N14)
+### Task 3: task identity, driver UI and clock (N03/N11/N14; N09 cancelled)
 **Files:** CarPlayHostActivity.kt, DiPlayActivity.kt, new CarPlayClockOverlay.kt/preferences/tests, existing display settings/translations and UI tests.
-**Interfaces:** Task labels BuickPlay · 连接管理 / BuickPlay · CarPlay, retain-debug. Clock uses local system time explicitly, off by default, positions left-bottom/right-bottom and bounded sizes; no touch interception or native-video resize. Settings belongs Display. Phone status only from existing proven iPhone protocol signal, never Android battery.
-- [x] RED tests task identity, lifecycle cleanup, clock sizes/positions/day-night, unknown phone state and driver action sizing.
-- [x] Implement task labels, optional clock with minute-aligned updates only when visible, live settings, invalid date indication; connection management one-tap retry and large controls; display reliable phone state or clear unavailable/unknown.
+**Interfaces:** Task labels BuickPlay · 连接管理 / BuickPlay · CarPlay, retain-debug. Clock uses local system time explicitly, off by default, positions left-bottom/right-bottom and bounded sizes; no touch interception or native-video resize. Settings belongs Display. N09 cancelled by user: remove the added unavailable label; no phone battery/charging feature planned.
+- [x] RED tests task identity, lifecycle cleanup, clock sizes/positions/day-night, driver action sizing.
+- [x] Implement task labels, optional clock with minute-aligned updates only when visible, live settings, invalid date indication; connection management one-tap retry and large controls.
 - [x] Generate compact/full large-font UI evidence (Arabic if alignment touched), including Task1 export range/session selector and bounded preview handoff, run focused/full CI, commit and report device-only limits.
 
 ### Task 4: independent audio volume and configuration completeness (N04/N07/N10)

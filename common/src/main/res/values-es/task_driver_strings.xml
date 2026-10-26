@@ -8,5 +8,4 @@
     <string name="settings_clock_size">Tamaño del reloj</string>
     <string name="settings_clock_description">Usa la hora del sistema del coche, no la del iPhone. Los cambios se aplican al volver a CarPlay. Se deja espacio para el Dock; comprueba la posición con el coche aparcado.</string>
     <string name="settings_clock_unknown">Hora desconocida —</string>
-    <string name="settings_phone_power_unavailable">Batería y carga del iPhone: no disponibles</string>
 </resources>

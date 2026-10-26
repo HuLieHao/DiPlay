@@ -8,5 +8,4 @@
     <string name="settings_clock_size">時鐘字級</string>
     <string name="settings_clock_description">使用車機系統時間，並非 iPhone 時鐘。返回 CarPlay 時生效。已預留 Dock 空間，請停車後確認位置。</string>
     <string name="settings_clock_unknown">時間未知 —</string>
-    <string name="settings_phone_power_unavailable">iPhone 電量及充電狀態：無法使用</string>
 </resources>

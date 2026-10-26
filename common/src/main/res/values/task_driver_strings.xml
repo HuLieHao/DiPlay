@@ -8,5 +8,4 @@
     <string name="settings_clock_size">Clock text size</string>
     <string name="settings_clock_description">Uses the head unit’s system time, not the iPhone clock. Changes apply when returning to CarPlay. Insets leave room for the dock; verify placement while parked.</string>
     <string name="settings_clock_unknown">Time unknown —</string>
-    <string name="settings_phone_power_unavailable">iPhone battery and charging: unavailable</string>
 </resources>

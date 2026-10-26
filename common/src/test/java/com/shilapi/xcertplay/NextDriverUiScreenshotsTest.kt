@@ -48,7 +48,6 @@ class NextDriverUiScreenshotsTest {
             }
             val home = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
             method("home", LinearLayout::class.java).invoke(activity, home)
-            assertTrue(views(home).filterIsInstance<TextView>().any { it.text == activity.getString(R.string.settings_phone_power_unavailable) })
             val primary = views(home).filterIsInstance<TextView>().single { it.text == activity.getString(R.string.connect_phone) }
             assertTrue(primary.layoutParams.height >= (48 * activity.resources.displayMetrics.density).toInt())
             capture(home, width, "$name-home")

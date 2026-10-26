@@ -8,5 +8,4 @@
     <string name="settings_clock_size">時計の文字サイズ</string>
     <string name="settings_clock_description">iPhone ではなく車載機のシステム時刻を使用します。CarPlay に戻ると変更が反映されます。Dock の空間を確保しています。停車中に位置を確認してください。</string>
     <string name="settings_clock_unknown">時刻不明 —</string>
-    <string name="settings_phone_power_unavailable">iPhone のバッテリーと充電状態：取得不可</string>
 </resources>

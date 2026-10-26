@@ -950,7 +950,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         card.addView(homeCardTitle)
         status = label(getString(R.string.ready_when_you_are), 24, TEXT, true).apply { setPadding(0, dp(10), 0, dp(16)) }
         card.addView(status)
-        card.addView(label(getString(R.string.settings_phone_power_unavailable), 14, MUTED))
         connectButton = homeButton(getString(R.string.connect_phone), true) {
             if (CarPlayBackgroundSession.hasSession()) openProjection()
             else connect(true)
