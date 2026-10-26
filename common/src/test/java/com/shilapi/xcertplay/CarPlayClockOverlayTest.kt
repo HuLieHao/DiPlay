@@ -74,18 +74,22 @@ class CarPlayClockOverlayTest {
         assertEquals(118, params.width)
         assertEquals(20, params.leftMargin)
         assertEquals(812, params.topMargin)
-        assertEquals(40f, overlay.textSize, .01f)
+        assertEquals(32f, overlay.textSize, .01f)
+        assertEquals(android.graphics.Color.WHITE, overlay.currentTextColor)
+        assertEquals(android.graphics.Color.BLACK, overlay.shadowColor)
+        assertEquals(2f, overlay.shadowRadius, .01f)
         val originalScaledDensity = activity.resources.displayMetrics.scaledDensity
         activity.resources.displayMetrics.scaledDensity = 3f
         overlay.update(true, false)
-        assertEquals(40f, overlay.textSize, .01f)
+        assertEquals(32f, overlay.textSize, .01f)
         overlay.setVideoContentBounds(android.graphics.RectF(40f, 200f, 1020f, 629f))
-        assertEquals(20f, overlay.textSize, .01f)
+        assertEquals(16f, overlay.textSize, .01f)
+        assertEquals(1f, overlay.shadowRadius, .01f)
         CarPlayClockSettings.save(activity, "right", 24)
         overlay.update(true, false)
         val right = overlay.layoutParams as FrameLayout.LayoutParams
         assertEquals(961, right.leftMargin)
-        assertTrue(overlay.textSize in 20f..24f)
+        assertTrue(overlay.textSize in 16f..19.2f)
         assertTrue(overlay.paint.measureText("00:00") <= right.width + .01f)
         overlay.update(false, false)
         activity.resources.displayMetrics.scaledDensity = originalScaledDensity
@@ -133,7 +137,7 @@ class CarPlayClockOverlayTest {
         shadowOf(Looper.getMainLooper()).idleFor(2, TimeUnit.MINUTES)
         assertEquals(hidden, reads)
         overlay.update(true, true)
-        assertEquals(32f, overlay.textSize, .01f)
+        assertEquals(25.6f, overlay.textSize, .01f)
         root.removeView(overlay)
         val detached = reads
         shadowOf(Looper.getMainLooper()).idleFor(2, TimeUnit.MINUTES)
@@ -152,16 +156,17 @@ class CarPlayClockOverlayTest {
         overlay.update(true, false)
         CarPlayClockSettings.save(activity, "right", 24)
         shadowOf(Looper.getMainLooper()).idle()
-        assertTrue(overlay.textSize in 40f..48f)
+        assertTrue(overlay.textSize in 32f..38.4f)
         val params = overlay.layoutParams as FrameLayout.LayoutParams
         assertEquals(android.view.Gravity.TOP or android.view.Gravity.LEFT, params.gravity)
         val dayColor = overlay.currentTextColor
         overlay.update(true, true)
-        assertNotEquals(dayColor, overlay.currentTextColor)
+        assertEquals(dayColor, overlay.currentTextColor)
+        assertEquals(android.graphics.Color.WHITE, overlay.currentTextColor)
         overlay.update(false, true)
         CarPlayClockSettings.save(activity, "left", 16)
         shadowOf(Looper.getMainLooper()).idle()
-        assertTrue(overlay.textSize in 40f..48f)
+        assertTrue(overlay.textSize in 32f..38.4f)
         activity.finish()
     }
 

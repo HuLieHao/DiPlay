@@ -83,7 +83,7 @@ class NextDriverUiScreenshotsTest {
                 @Suppress("DEPRECATION")
                 activity.resources.updateConfiguration(config, activity.resources.displayMetrics)
                 for (night in listOf(false, true)) {
-                    val root = android.widget.FrameLayout(activity).apply { setBackgroundColor(android.graphics.Color.rgb(40, 52, 68)) }
+                    val root = android.widget.FrameLayout(activity).apply { setBackgroundColor(if (night) android.graphics.Color.rgb(40, 52, 68) else android.graphics.Color.rgb(232, 234, 238)) }
                     root.addView(TextView(activity).apply { text = "Video viewport fixture"; setTextColor(android.graphics.Color.WHITE) })
                     val clock = CarPlayClockOverlay(activity, android.os.Handler(android.os.Looper.getMainLooper())) { 1_800_000_020_000L }
                     clock.setVideoContentBounds(android.graphics.RectF(0f, 0f, width.toFloat(), 360f))

@@ -84,7 +84,8 @@ internal class CarPlayClockOverlay(
         val position = CarPlayClockSettings.position(context)
         running = visible && position != "off"
         visibility = if (running) View.VISIBLE else View.GONE
-        setTextColor(if (night) Color.rgb(232, 234, 238) else Color.rgb(24, 28, 32))
+        // CarPlay can change its sidebar independently of the host day/night setting.
+        setTextColor(Color.WHITE)
         placeInDock(position)
         if (running && isAttachedToWindow && !registered) {
             context.registerReceiver(timeChanged, IntentFilter().apply {
@@ -121,15 +122,18 @@ internal class CarPlayClockOverlay(
     }
     private fun placeInDock(position: String) {
         // Calibrated from a 1960 x 858 landscape CarPlay raster: sidebar 118, native
-        // glyph height ~31 (nominal Android font40), menu center59 above the bottom.
+        // native glyph box measured26px high on-device; nominal Android font32 matches it.
+        // The earlier31px estimate came from a scaled screenshot. Menu center59 above bottom.
         // No native widget bounds are exposed.
         // Scale with video height, cap the sidebar to the visible width for narrow layouts.
         val scale = contentBounds.height().coerceAtLeast(0f) / 858f
+        // A thin dark contour keeps white glyphs legible over light or dark video.
+        setShadowLayer(2f * scale, 0f, 0f, Color.BLACK)
         val dockWidth = (118f * scale).coerceAtMost(contentBounds.width().coerceAtLeast(0f))
         val clockHeight = (56f * scale).coerceAtMost(contentBounds.height().coerceAtLeast(0f))
         val top = (contentBounds.bottom - 146f * scale)
             .coerceAtLeast(contentBounds.top)
-        setTextSize(TypedValue.COMPLEX_UNIT_PX, 40f * scale * CarPlayClockSettings.size(context) / 20f)
+        setTextSize(TypedValue.COMPLEX_UNIT_PX, 32f * scale * CarPlayClockSettings.size(context) / 20f)
         // Preserve all five HH:mm characters even for the largest preference or narrow video.
         val timeWidth = paint.measureText("00:00")
         val availableWidth = dockWidth.toInt().toFloat()
