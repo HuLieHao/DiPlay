@@ -19,6 +19,24 @@ class SettingsBackupCodecTest {
 
     private fun prefs(name: String) = context.getSharedPreferences(name, Context.MODE_PRIVATE)
 
+    @Test fun clockAndVolumePreferencesTravelWithoutAccessibilityConsent() {
+        prefs("xcertplay_airplay").edit().putString("carplay_clock_position", "right").putInt("carplay_clock_size_sp", 24).apply()
+        prefs("diplay_navigation_wheel").edit().putBoolean("enabled", true).putBoolean("authorized", true).apply()
+        prefs("diplay_volume").edit().putBoolean("enabled", true).apply()
+        val document = SettingsBackupCodec.export(context, "formal-new")
+        val files = JSONObject(String(document)).getJSONObject("settings")
+        assertFalse(files.getJSONObject("diplay_navigation_wheel").has("authorized"))
+        prefs("xcertplay_airplay").edit().clear().commit()
+        prefs("diplay_navigation_wheel").edit().clear().commit()
+        prefs("diplay_volume").edit().clear().commit()
+        assertFalse(SettingsBackupCodec.import(context, document).invalid)
+        assertEquals("right", prefs("xcertplay_airplay").getString("carplay_clock_position", null))
+        assertEquals(24, prefs("xcertplay_airplay").getInt("carplay_clock_size_sp", 0))
+        assertTrue(prefs("diplay_navigation_wheel").getBoolean("enabled", false))
+        assertFalse(prefs("diplay_navigation_wheel").contains("authorized"))
+        assertTrue(prefs("diplay_volume").getBoolean("enabled", false))
+    }
+
     @Test
     fun exportOmitsSensitiveAndNavigationKeys() {
         prefs("xcertplay_airplay").edit()
@@ -106,6 +124,24 @@ class SettingsBackupCodecTest {
         assertTrue(AirPlayPersistence.loadLegacyClusterEnabled(context))
         assertTrue(AirPlayPersistence.loadLauncherBubble(context))
         assertEquals(16, AirPlayPersistence.loadLauncherBubbleSize(context))
+    }
+
+    @Test fun oldVersionOneDebugBackupImportsPortableConfigButKeepsInstallationIdentity() {
+        prefs("xcertplay_airplay").edit().putString("identity_private", "formal-key")
+            .putString("pairing.local", "formal-pair").putString("carplay_clock_position", "off").apply()
+        val oldDebug = """{"format":"diplay-settings","version":1,"app":"0.2.17-debug","settings":{
+            "xcertplay_airplay":{"media_audio_channel":2,"navigation_stream_type":11,"media_buffer_ms":160,
+            "display_fps":30,"manual_hotspot_band":2,"manual_hotspot_channel":6,
+            "identity_private":"debug-key","pairing.local":"debug-pair"},
+            "diplay_car_hotspot":{"auto_enable":true}}}"""
+        val result = SettingsBackupCodec.import(context, oldDebug.toByteArray())
+        assertFalse(result.invalid)
+        assertEquals(7, result.applied); assertEquals(2, result.skipped)
+        assertEquals(11, prefs("xcertplay_airplay").getInt("navigation_stream_type", 0))
+        assertEquals("formal-key", prefs("xcertplay_airplay").getString("identity_private", null))
+        assertEquals("formal-pair", prefs("xcertplay_airplay").getString("pairing.local", null))
+        assertEquals("off", prefs("xcertplay_airplay").getString("carplay_clock_position", null))
+        assertTrue(prefs("diplay_car_hotspot").getBoolean("auto_enable", false))
     }
 
     @Test

@@ -1,0 +1,5 @@
+<resources>
+    <string name="settings_carplay_volume_bar">Barra de volumen de CarPlay (experimental)</string>
+    <string name="settings_carplay_volume_bar_description">Con CarPlay visible, las teclas recibidas ajustan un paso el volumen multimedia o de navegación identificado. Las llamadas y Siri tienen prioridad. No requiere permiso de superposición. El firmware puede interceptar teclas o mostrar su propia barra; pueden aparecer dos barras. Otras aplicaciones conservan sus controles.</string>
+    <string name="settings_backup_scope">Las copias trasladan los ajustes compatibles de punto de acceso, audio, pantalla, reloj y volumen entre versiones e instalaciones normales o de depuración. No incluyen claves de emparejamiento o autenticación, identidad del teléfono, nombre o contraseña Wi-Fi, permisos ni iconos personalizados. Cada instalación conserva sus datos; vuelva a autorizar y emparejar si hace falta.</string>
+</resources>

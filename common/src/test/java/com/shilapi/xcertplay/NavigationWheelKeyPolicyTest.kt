@@ -4,6 +4,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NavigationWheelKeyPolicyTest {
+    @Test fun visibleVolumeRoutePreservesPriorityAndRejectsAmbiguousGuidance() {
+        fun route(active: Boolean, stream: Int?, priority: Boolean = false, call: Boolean = false) =
+            carPlayVolumeStream(com.shilapi.xcertplay.media.NavigationPlaybackSnapshot(active, stream, priority), call)
+        assertEquals(3, route(false, null))
+        assertEquals(5, route(true, 5))
+        assertEquals(14, route(true, 14))
+        assertNull(route(true, null))
+        assertNull(route(true, 3))
+        assertNull(route(false, null, priority = true))
+        assertNull(route(true, 5, call = true))
+    }
+
     @Test fun clampsStream14LimitsAndRejectsInvalidReadbacks() {
         assertEquals(0, navigationWheelTarget(0, 0, 15, -1))
         assertEquals(15, navigationWheelTarget(15, 0, 15, 1))

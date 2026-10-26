@@ -1,0 +1,5 @@
+<resources>
+    <string name="settings_carplay_volume_bar">CarPlay 音量バー（実験的機能）</string>
+    <string name="settings_carplay_volume_bar_description">CarPlay 表示中、受信した音量キーでメディアまたは識別済みのナビ音声を1段階調整します。通話と Siri を優先し、重ねて表示する権限は不要です。端末がキーを先に処理したり独自のバーを表示したりすると、2本のバーが表示される場合があります。他のアプリの操作は従来どおりです。</string>
+    <string name="settings_backup_scope">対応するホットスポット、音声、画面、時計、音量の設定をバージョン間や正式版・デバッグ版間で移行できます。ペアリング・認証キー、電話の識別情報、ホットスポット名とパスワード、権限、独自アイコンは移行しません。各版のデータは独立しています。必要に応じて再許可・再ペアリングしてください。</string>
+</resources>

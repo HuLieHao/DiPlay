@@ -1,0 +1,5 @@
+<resources>
+    <string name="settings_carplay_volume_bar">Barra del volume CarPlay (sperimentale)</string>
+    <string name="settings_carplay_volume_bar_description">Con CarPlay visibile, i tasti ricevuti regolano di un livello il volume multimediale o di navigazione identificato. Chiamate e Siri hanno priorità. Non serve il permesso di sovrapposizione. Il firmware può intercettare i tasti o mostrare la propria barra; possono apparire due barre. Le altre app mantengono i controlli originali.</string>
+    <string name="settings_backup_scope">Il backup trasferisce le impostazioni supportate di hotspot, audio, schermo, orologio e volume tra versioni e installazioni normali o debug. Esclude chiavi di abbinamento e autenticazione, identità del telefono, nome e password hotspot, permessi e icone personalizzate. I dati delle installazioni restano separati; autorizzare e abbinare di nuovo se necessario.</string>
+</resources>

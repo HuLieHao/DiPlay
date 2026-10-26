@@ -37,6 +37,35 @@ class AudioFocusAutoYieldTest {
         VolumeTrackingAudioTrack.volumes.clear()
     }
 
+    @Test fun guidanceAndVoiceEndNeverOverwriteIndependentUserVolumes() {
+        val coordinator = coordinator()
+        val media = track(); val navigation = track(); val assistant = track(); val phone = track()
+        manager.setStreamVolume(AudioManager.STREAM_MUSIC, 3, 0)
+        manager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 5, 0)
+        val music = manager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val guidance = manager.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
+        coordinator.acquire(media, AudioChannel.MEDIA, attributes)
+        val mediaRequest = shadowOf(manager).lastAudioFocusRequest
+        coordinator.acquire(navigation, AudioChannel.NAVIGATION, attributes)
+        assertSame(mediaRequest, shadowOf(manager).lastAudioFocusRequest)
+        assertTrue(volumes(media).isEmpty()) // Guidance overlays; phone/iPhone controls its mixing.
+        coordinator.acquire(assistant, AudioChannel.ASSISTANT, attributes)
+        coordinator.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK)
+        coordinator.release(assistant)
+        coordinator.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_GAIN)
+        coordinator.acquire(phone, AudioChannel.PHONE, attributes)
+        coordinator.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)
+        coordinator.release(phone)
+        coordinator.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_GAIN)
+        coordinator.release(navigation)
+        assertEquals(listOf(.2f, 1f, 0f, 1f), volumes(media))
+        assertTrue(volumes(navigation).isEmpty())
+        assertTrue(volumes(assistant).isEmpty())
+        assertTrue(volumes(phone).isEmpty())
+        assertEquals(music, manager.getStreamVolume(AudioManager.STREAM_MUSIC))
+        assertEquals(guidance, manager.getStreamVolume(AudioManager.STREAM_NOTIFICATION))
+    }
+
     @Test fun transientLossMutesOnlyMediaAndGainPreservesUserStreamVolume() {
         val coordinator = coordinator()
         val media = track(); val phone = track(); val assistant = track(); val navigation = track()

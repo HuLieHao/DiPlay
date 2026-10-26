@@ -1,0 +1,5 @@
+<resources>
+    <string name="settings_carplay_volume_bar">CarPlay 音量條（實驗性）</string>
+    <string name="settings_carplay_volume_bar_description">CarPlay 顯示時，應用收到的音量鍵每次調節媒體或已識別的導航音訊串流一級。通話和 Siri 優先，無需懸浮視窗權限。韌體可能提前攔截按鍵或自行顯示原車音量條，仍可能出現雙音量條；其他應用維持原有控制。</string>
+    <string name="settings_backup_scope">備份可在不同版本及正式/除錯版間遷移支援的熱點、音訊、畫面、時鐘和音量設定。不遷移配對與認證金鑰、手機身分、熱點名稱和密碼、權限或自訂圖示。正式版與除錯版資料獨立，恢復後請按需重新授權和配對。</string>
+</resources>

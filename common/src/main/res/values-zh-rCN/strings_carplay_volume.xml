@@ -1,0 +1,5 @@
+<resources>
+    <string name="settings_carplay_volume_bar">CarPlay 音量条（实验性）</string>
+    <string name="settings_carplay_volume_bar_description">CarPlay 可见时，应用收到的音量键每次调节媒体或已识别的导航音频流一级。通话和 Siri 优先，无需悬浮窗权限。固件可能提前拦截按键，或自行显示原车音量条，仍可能出现双音量条；其他应用保持原有控制。</string>
+    <string name="settings_backup_scope">备份可在不同版本及正式/调试版间迁移受支持的热点、音频、画面、时钟和音量设置。不迁移配对与认证密钥、手机身份、热点名称和密码、权限或自定义图标。正式版与调试版数据独立，恢复后按需重新授权和配对。</string>
+</resources>

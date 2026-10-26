@@ -1185,6 +1185,9 @@ class CarPlayHostActivity : ComponentActivity() {
         super.onResume()
         WheelKeyService.restoreIfNeeded(this)
         hostAppearanceResumed = true
+        CarPlayVolumeDisplay.show = { stream, current, maximum ->
+            if (hostAppearanceResumed && activeScreenStreamTypes.isNotEmpty() && !menuOpen && CarPlayVolumeSettings.enabled(this)) volumeOverlay?.show(stream, current, maximum)
+        }
         updateDebugOverlays()
         updateCallPopupGuard()
         val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
@@ -1642,7 +1645,23 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     // Hardware navigation belongs to the iPhone-rendered CarPlay UI, not Android View focus.
+    private val volumeKeys by lazy {
+        val audio = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        CarPlayVolumeKeyRouter(
+            { if (hostAppearanceResumed && activeScreenStreamTypes.isNotEmpty() && !menuOpen && activeAirPlaySession != null && CarPlayVolumeSettings.enabled(this))
+                carPlayVolumeStream(com.shilapi.xcertplay.media.NavigationPlayback.snapshot(), inCall(this)) else null },
+            { stream -> navigationWheelMinimum(stream, android.os.Build.VERSION.SDK_INT) {
+                if (android.os.Build.VERSION.SDK_INT >= 28) audio.getStreamMinVolume(it) else 0
+            } }, audio::getStreamMaxVolume, audio::getStreamVolume, audio::setStreamVolume,
+            { stream, current, maximum -> volumeOverlay?.show(stream, current, maximum) },
+        )
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // A volume release/repeat still belongs to its initial press after settings or voice state change.
+        if (volumeKeys.owns(event.keyCode, event.deviceId, event.downTime)) {
+            return volumeKeys.onKey(event.action, event.keyCode, event.deviceId, event.downTime, event.repeatCount)
+        }
         val physicalKey = Triple(event.deviceId, event.keyCode, event.scanCode)
         val downOrUp = event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP
         if (downOrUp && physicalKey in legacySiriPresses) {
@@ -1791,6 +1810,8 @@ class CarPlayHostActivity : ComponentActivity() {
             return true
         }
 
+        if (volumeKeys.onKey(event.action, event.keyCode, event.deviceId, event.downTime, event.repeatCount)) return true
+
         // Keep DiPlay's existing steering-wheel/voice-key Siri handling intact.
         if (CarPlayMediaButton.isShortVoiceKey(event.keyCode) && WheelZoomSettings.siriLongPressOnly(this)) return true
         if (!CarPlayMediaButton.opensSiri(event.keyCode)) return super.dispatchKeyEvent(event)
@@ -1824,6 +1845,8 @@ class CarPlayHostActivity : ComponentActivity() {
         cancelTemporarySystemBars()
         hostAppearanceResumed = false
         clockOverlay?.update(false, darkMode)
+        CarPlayVolumeDisplay.show = null
+        volumeOverlay?.stop()
         updateCallPopupGuard()
         AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()
@@ -1985,6 +2008,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private var clockOverlay: CarPlayClockOverlay? = null
+    private var volumeOverlay: CarPlayVolumeOverlay? = null
 
     private fun buildContentView(): View {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
@@ -2004,6 +2028,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         root.addView(gestureLayer, FrameLayout.LayoutParams(-1, -1))
         clockOverlay = CarPlayClockOverlay(this, mainHandler).also { root.addView(it) }
+        volumeOverlay = CarPlayVolumeOverlay(this, mainHandler).also { root.addView(it) }
         val waiting = ConnectionWaitingView(this,
             onBack = { showDiPlayHome() },
             onRetry = {
@@ -6622,6 +6647,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun updateDebugOverlays() {
         clockOverlay?.update(hostAppearanceResumed && activeScreenStreamTypes.isNotEmpty() && !menuOpen, darkMode)
+        if (!hostAppearanceResumed || activeScreenStreamTypes.isEmpty() || menuOpen) volumeOverlay?.stop()
         statusScrollView?.visibility = View.GONE
         connectionPanel?.visibility = if (activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
         waitingScreen?.update(waitingProgress, wirelessEnabled)

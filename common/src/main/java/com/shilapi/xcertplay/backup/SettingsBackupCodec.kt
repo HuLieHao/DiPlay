@@ -36,7 +36,7 @@ object SettingsBackupCodec {
         "adb_cluster_activity_enabled", "platform21_cluster_enabled", "center_map_overlay", "center_map_auto_hide",
         "center_map_follows_dashboard", "settings_gesture_fingers", "display_width_physical_mm",
         "display_physical_size_basis", "right_hand_drive", "hide_top_bar", "hide_bottom_bar",
-        "temporary_system_bars",
+        "temporary_system_bars", "carplay_clock_position", "carplay_clock_size_sp",
         "harman_fullscreen", "safe_area_draw_outside", "main_display_disable_safe_area",
         "black_corner_radius_dp",
         "adapt_pip_resolution", "auto_start_on_boot", "bt_suspend_during_carplay", "hide_byd_call_popup",
@@ -60,6 +60,8 @@ object SettingsBackupCodec {
         "xcertplay_airplay" to Policy.Allow(AIRPLAY_KEYS, AIRPLAY_PREFIXES),
         "diplay" to Policy.Allow(DIPLAY_KEYS),
         "carplay_picture" to Policy.All,
+        "diplay_navigation_wheel" to Policy.Allow(setOf("enabled")),
+        "diplay_volume" to Policy.Allow(setOf("enabled")),
         "diplay_car_hotspot" to Policy.All,
     )
 

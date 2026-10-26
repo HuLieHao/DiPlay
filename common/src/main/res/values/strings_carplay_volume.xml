@@ -1,0 +1,5 @@
+<resources>
+    <string name="settings_carplay_volume_bar">CarPlay volume bar (experimental)</string>
+    <string name="settings_carplay_volume_bar_description">While CarPlay is visible, received volume keys adjust media or the known active navigation stream by one step. Calls and Siri keep priority. No overlay permission is needed. Firmware may intercept keys or independently show its own bar; two bars can still appear. Other apps keep the original controls.</string>
+    <string name="settings_backup_scope">Backups move supported hotspot, audio, display, clock and volume settings between versions and formal/debug installs. They do not move pairing or authentication keys, phone identity, hotspot name/password, permissions or custom icons. Formal and debug apps keep separate data; grant permissions and pair again as needed.</string>
+</resources>

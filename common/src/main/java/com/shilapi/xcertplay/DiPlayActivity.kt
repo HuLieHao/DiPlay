@@ -2618,6 +2618,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         content.addView(space(SETTINGS_BLOCK_GAP_DP))
         content.addView(card().apply {
             addView(label(getString(if (forReport) R.string.settings_report_on_phone_hint else R.string.backup_page_hint), 16, MUTED))
+            if (!forReport) addView(label(getString(R.string.settings_backup_scope), 14, MUTED))
             addView(qr, LinearLayout.LayoutParams(dp(240) + dp(24), dp(240) + dp(24)).apply {
                 topMargin = dp(SETTINGS_BLOCK_GAP_DP); gravity = Gravity.CENTER_HORIZONTAL
             })
@@ -4201,6 +4202,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     /** Optional guidance-volume routing through the existing wheel service. */
     private fun navigationWheelControls(card: LinearLayout) {
+        toggle(card, getString(R.string.settings_carplay_volume_bar), getString(R.string.settings_carplay_volume_bar_description),
+            CarPlayVolumeSettings.enabled(this)) { CarPlayVolumeSettings.save(this, it) }
         toggle(card, getString(R.string.settings_navigation_wheel_volume), getString(R.string.settings_navigation_wheel_volume_description),
             NavigationWheelSettings.enabled(this)) {
             NavigationWheelSettings.setEnabled(this, it)
