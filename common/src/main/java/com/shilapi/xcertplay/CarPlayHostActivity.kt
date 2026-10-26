@@ -2002,7 +2002,9 @@ class CarPlayHostActivity : ComponentActivity() {
         fallbackVideoView = null
         fallbackVideoBounds = null
         AsyncDiagnosticLog.append(sessionLog, "Activity destroyed")
-        AsyncDiagnosticLog.close(sessionLog)
+        // Connection targets hold no open file. The controller/sink may still emit their old tail,
+        // or be adopted by another host; only a host-only setup target is closed here.
+        if (sessionLog?.isConnectionRun != true) AsyncDiagnosticLog.close(sessionLog)
         sessionLog = null
         super.onDestroy()
     }
@@ -5181,11 +5183,7 @@ class CarPlayHostActivity : ComponentActivity() {
             },
             mediaBufferMillis = AirPlayPersistence.loadMediaBufferMillis(this, wireless = wirelessEnabled),
             onAudioDiagnostic = { message ->
-                if (message.startsWith("Microphone: ")) {
-                    AsyncDiagnosticLog.append(diagnosticLog, message)
-                } else {
-                    diagnosticLog?.append(formattedLogLine(message, System.currentTimeMillis()))
-                }
+                AsyncDiagnosticLog.append(diagnosticLog, message)
             },
             onMediaAudioChanged = CarPlayMediaKeys::onMediaAudioChanged,
             callEchoCancellation = AirPlayPersistence.loadCallEchoCancellation(this),
@@ -5400,6 +5398,7 @@ class CarPlayHostActivity : ComponentActivity() {
             CarPlayBackgroundSession.stop(manual = false) { postBackgroundSessionReady(ticket) }
             return false
         }
+        snapshot.diagnosticLog?.let { sessionLog = it; it.activate() }
         displayDiagnosticAttempt = DisplayDiagnosticSnapshot.currentAttempt(this)
         adbClusterConfigured = AdbClusterRouter.enabled(this) && snapshot.controller.configuredClusterSize() ==
             (DiLink4ClusterDisplay.STREAM_WIDTH to DiLink4ClusterDisplay.STREAM_HEIGHT)
@@ -5491,6 +5490,9 @@ class CarPlayHostActivity : ComponentActivity() {
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) return
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress || controller != null) return
         val controllerGeneration = restartGeneration
+        if (sessionLog == null) initializeSessionLog()
+        sessionLog = sessionLog!!.connectionRun(controllerGeneration)
+        appendLog("session_connection_run_started controllerGeneration=$controllerGeneration")
         // Settings → Connection can change the target while this screen stays open (#696).
         mfiTarget = AirPlayPersistence.loadMfiTarget(this)
         runCatching { DiPlayBootstrap.ensure(this, mfiTarget) }
@@ -5589,6 +5591,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 finish()
             }
         }
+        CarPlayBackgroundSession.attachDiagnosticLog(next, sessionLog)
         try {
             ContextCompat.startForegroundService(this, Intent(this, DiPlaySessionService::class.java))
             next.start()
@@ -6701,20 +6704,15 @@ class CarPlayHostActivity : ComponentActivity() {
         AsyncDiagnosticLog.append(sessionLog, message)
     }
 
-    private fun formattedLogLine(message: String, nowMillis: Long): String =
-        "${SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(nowMillis))}  $message"
-
     private fun initializeSessionLog() {
         val logFile = File(File(filesDir, "logs"), "diplay.log")
-        val activeLog = SessionLogFile(logFile)
-        runCatching {
-            activeLog.reset(
-                "DiPlay log started " +
-                    "${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())} " +
-                    "pid=${Process.myPid()} path=${logFile.absolutePath}",
-            )
-        }
+        val app = applicationContext
+        val activeLog = SessionLogFile(logFile,
+            "kind=host_setup pid=${Process.myPid()} path=${logFile.absolutePath}",
+            lazy { DiagnosticBuildInfo.report(app) })
+        activeLog.activate()
         sessionLog = activeLog
+        AsyncDiagnosticLog.append(activeLog, "DiPlay log started host_setup")
     }
 
     private fun refreshLogView(nowMillis: Long) {
@@ -6990,6 +6988,7 @@ internal object CarPlayBackgroundSession {
         val width: Int,
         val height: Int,
         val display: CarPlaySessionDisplay,
+        val diagnosticLog: SessionLogFile? = null,
     )
 
     private var controller: CarPlayController? = null
@@ -6997,19 +6996,26 @@ internal object CarPlayBackgroundSession {
     private var width = 0
     private var height = 0
     private var display: CarPlaySessionDisplay? = null
+    private var diagnosticLog: SessionLogFile? = null
+
+    @Synchronized
+    fun attachDiagnosticLog(expected: CarPlayController, log: SessionLogFile?) {
+        if (controller === expected) diagnosticLog = log
+    }
 
     @Synchronized
     fun snapshot(): Snapshot? {
         val currentController = controller ?: return null
         val currentSink = sink ?: return null
         val currentDisplay = display ?: return null
-        return Snapshot(currentController, currentSink, width, height, currentDisplay)
+        return Snapshot(currentController, currentSink, width, height, currentDisplay, diagnosticLog)
     }
 
     @Synchronized
     fun store(controller: CarPlayController, sink: AndroidMediaSink, width: Int, height: Int,
         owner: Any, display: CarPlaySessionDisplay, stop: (() -> Unit) -> Unit) {
         if (this.controller !== controller) {
+            diagnosticLog = null
             callPopupReady = false
             hotspotReady = null
         }
@@ -7028,6 +7034,7 @@ internal object CarPlayBackgroundSession {
         if (expected != null && controller !== expected) return
         controller = null
         sink = null
+        diagnosticLog = null
         if (!keepOwner) { stopAction = null; owner = null }
         active = false
         callPopupReady = false

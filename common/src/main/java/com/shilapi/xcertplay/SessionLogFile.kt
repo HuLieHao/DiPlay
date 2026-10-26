@@ -4,11 +4,28 @@ import java.io.Closeable
 import java.io.File
 
 /** Bounded, private diagnostics. Captured text is stored without content filtering. */
-internal class SessionLogFile(val file: File) : Closeable {
+internal class SessionLogFile(
+    val file: File,
+    private val initialHeader: String? = null,
+    private val recordingBuild: Lazy<String> = lazy { "" },
+    private val startupId: String? = null,
+) : Closeable {
     private val lock = Any()
     private var closed = false
     private val archive = DiagnosticArchive.forLogs(file.parentFile!!)
     private var session: String? = null
+    private val identity = java.util.UUID.randomUUID().toString()
+    private val admittedWall = System.currentTimeMillis()
+    private val admittedMono = System.nanoTime() / 1_000_000
+    val isConnectionRun: Boolean get() = startupId != null
+
+    /** No disk operations: immutable targets remain owned by their original callbacks. */
+    fun connectionRun(generation: Int): SessionLogFile = SessionLogFile(file,
+        "kind=controller_connection_run controllerGeneration=$generation startup=${startupId ?: identity}",
+        recordingBuild, startupId ?: identity).also { it.activate() }
+
+    fun activate() { archive.activate(session ?: identity) }
+
     fun reset(header: String) = synchronized(lock) {
         if (!closed) {
             file.parentFile?.mkdirs()
@@ -22,7 +39,11 @@ internal class SessionLogFile(val file: File) : Closeable {
         if (closed) return@synchronized
         val safe = DiagnosticRedactor.original(line)
         runCatching {
-            val id = session ?: archive.start("append_without_reset").also { session = it }
+            val id = session ?: archive.start(
+                (initialHeader ?: "append_without_reset") + " " + recordingBuild.value.replace('\n', ' '),
+                id = identity, startedWall = admittedWall, startedMono = admittedMono,
+                makeCurrent = initialHeader == null,
+            ).also { session = it }
             runCatching { archive.append(id, safe) }
             if (file.length() > MAX_BYTES) {
                 rotate()

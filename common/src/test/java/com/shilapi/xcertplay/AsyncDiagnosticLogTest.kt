@@ -5,6 +5,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AsyncDiagnosticLogTest {
+    @Test fun admittingConnectionTargetsDoesNoDiskOrBuildProbeAndRetainsRecordingBuild() {
+        val folder = Files.createTempDirectory("lazy-run-target").toFile()
+        try {
+            var buildReads = 0
+            val root = SessionLogFile(folder.resolve("diplay.log"), "kind=host_setup", lazy {
+                buildReads++; "versionCode=47 sourceRevision=recording-revision"
+            })
+            val first = root.connectionRun(1)
+            val second = first.connectionRun(2)
+            assertEquals(0, buildReads)
+            assertTrue(folder.listFiles()!!.isEmpty())
+            AsyncDiagnosticLog.append(first, "old original")
+            AsyncDiagnosticLog.append(second, "new original")
+            assertTrue(AsyncDiagnosticLog.awaitIdle(2000))
+            assertEquals(1, buildReads)
+            val metadata = folder.resolve("archive").listFiles()!!.filter { it.extension == "meta" }
+            assertEquals(2, metadata.size)
+            assertTrue(metadata.all { it.readText().contains("versionCode=47 sourceRevision=recording-revision") })
+            val parents = metadata.map { Regex("startup=([^ ]+)").find(it.readText())!!.groupValues[1] }
+            assertEquals(1, parents.distinct().size)
+        } finally { folder.deleteRecursively() }
+    }
+
     @Test fun orderlyCloseDrainsItsQueuedTailBeforeClosingFile() {
         val folder = Files.createTempDirectory("close-tail").toFile()
         val target = SessionLogFile(folder.resolve("diplay.log"))

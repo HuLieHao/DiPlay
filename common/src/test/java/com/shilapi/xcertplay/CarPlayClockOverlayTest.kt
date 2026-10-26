@@ -18,6 +18,50 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29])
 class CarPlayClockOverlayTest {
+    @Test fun repeatedShowHideAndDetachDoesNotAccumulateMinuteCallbacks() {
+        val controller = Robolectric.buildActivity(Activity::class.java).setup()
+        val activity = controller.get()
+        val handler = Handler(Looper.getMainLooper())
+        var reads = 0
+        val root = FrameLayout(activity)
+        activity.setContentView(root)
+        CarPlayClockSettings.save(activity, "left", 20)
+        repeat(24) {
+            val overlay = CarPlayClockOverlay(activity, handler) { reads++; 1_800_000_000_000L }
+            root.addView(overlay)
+            overlay.update(true, false)
+            overlay.update(true, true)
+            val before = reads
+            shadowOf(Looper.getMainLooper()).idleFor(60, TimeUnit.SECONDS)
+            assertEquals(before + 1, reads)
+            overlay.update(false, true)
+            root.removeView(overlay)
+            val detached = reads
+            CarPlayClockSettings.save(activity, "right", 24)
+            shadowOf(Looper.getMainLooper()).idleFor(2, TimeUnit.MINUTES)
+            assertEquals(detached, reads)
+        }
+        controller.pause().stop().destroy()
+    }
+
+    @Test fun clockHonorsAndroidTwelveAndTwentyFourHourPreference() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val oldZone = java.util.TimeZone.getDefault()
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
+        try {
+            val overlay = CarPlayClockOverlay(activity, Handler(Looper.getMainLooper())) { 1_800_018_000_000L } // 13:00 UTC
+            CarPlayClockSettings.save(activity, "left", 20)
+            android.provider.Settings.System.putString(activity.contentResolver, android.provider.Settings.System.TIME_12_24, "24")
+            overlay.update(true, false)
+            assertEquals("13:00", overlay.text.toString())
+            android.provider.Settings.System.putString(activity.contentResolver, android.provider.Settings.System.TIME_12_24, "12")
+            overlay.update(true, false)
+            assertTrue(overlay.text.toString().startsWith("1:00"))
+            assertTrue(overlay.text.toString().contains("PM"))
+            overlay.update(false, false)
+        } finally { java.util.TimeZone.setDefault(oldZone); activity.finish() }
+    }
+
     @Test fun clockIsOptInClampedAndInvalidTimeIsExplicit() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val overlay = CarPlayClockOverlay(activity, Handler(Looper.getMainLooper())) { 0L }

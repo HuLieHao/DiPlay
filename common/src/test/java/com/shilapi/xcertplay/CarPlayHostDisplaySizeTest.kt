@@ -80,6 +80,56 @@ class CarPlayHostDisplaySizeTest {
         controllerConstruction.close()
     }
 
+    @Test fun sameHostReconnectRetainsSeparateRunsAndLateTailInOriginalExport() {
+        invoke("initializeSessionLog")
+        allowStartup()
+        invoke("maybeStartCarPlay")
+        val oldTarget = getField("sessionLog") as SessionLogFile
+        val oldListener = activity.javaClass.getDeclaredMethod("createSessionListener", Int::class.javaPrimitiveType)
+            .apply { isAccessible = true }.invoke(activity, getField("restartGeneration")) as AirPlaySessionListener
+        oldListener.onDebugLog("CONNECTION_DIAGNOSTIC token=outbound-original")
+        assertTrue(AsyncDiagnosticLog.awaitIdle(2000))
+        val archive = DiagnosticArchive.forLogs(java.io.File(activity.filesDir, "logs"))
+        val oldId = Regex("session=([^ ]+)").find(archive.correlation())!!.groupValues[1]
+        activity.javaClass.getDeclaredMethod("restartCarPlay", String::class.java).apply { isAccessible = true }
+            .invoke(activity, "test return connection")
+        finishTeardown()
+        assertNotSame("a new controller must capture its own immutable archive target", oldTarget, getField("sessionLog"))
+        val newListener = activity.javaClass.getDeclaredMethod("createSessionListener", Int::class.javaPrimitiveType)
+            .apply { isAccessible = true }.invoke(activity, getField("restartGeneration")) as AirPlaySessionListener
+        newListener.onDebugLog("CONNECTION_DIAGNOSTIC token=return-original")
+        oldListener.onDebugLog("CONNECTION_DIAGNOSTIC token=outbound-late-tail")
+        assertTrue(AsyncDiagnosticLog.awaitIdle(2000))
+        val newId = Regex("session=([^ ]+)").find(archive.correlation())!!.groupValues[1]
+        assertNotEquals(oldId, newId)
+        for ((id, wanted, unwanted) in listOf(Triple(oldId, "outbound-original", "return-original"), Triple(newId, "return-original", "outbound-late-tail"))) {
+            val destination = java.io.File(activity.cacheDir, "$id.zip")
+            try {
+                archive.export(destination, id, "export metadata")
+                java.util.zip.ZipFile(destination).use { zip ->
+                    val original = zip.entries().asSequence().filter { it.name.endsWith(".log") }
+                        .joinToString { zip.getInputStream(it).bufferedReader().readText() }
+                    assertTrue(original.contains(wanted))
+                    assertFalse(original.contains(unwanted))
+                    if (id == oldId) assertTrue(original.contains("outbound-late-tail"))
+                    val meta = zip.getInputStream(zip.getEntry("logs/$id.meta")).bufferedReader().readText()
+                    assertTrue(meta.contains("kind=controller_connection_run"))
+                    assertTrue(meta.contains("startup="))
+                    assertTrue(meta.contains("versionCode="))
+                    assertTrue(meta.contains("sourceRevision="))
+                }
+            } finally { destination.delete() }
+        }
+        val currentTarget = getField("sessionLog")
+        // Replacement host setup must not steal the surviving controller's log identity.
+        invoke("initializeSessionLog")
+        assertEquals(true, invoke("adoptBackgroundSession"))
+        assertSame(currentTarget, getField("sessionLog"))
+        assertTrue(archive.correlation().contains("session=$newId "))
+        assertTrue(AsyncDiagnosticLog.awaitIdle(2000))
+        assertEquals(2, controllerConstruction.constructed().size)
+    }
+
     @Test fun surroundViewOpenAndCloseKeepsTheNegotiatedCanvas() {
         val display = startSession()
         applySize(1920, 942)

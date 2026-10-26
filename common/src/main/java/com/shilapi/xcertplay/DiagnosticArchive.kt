@@ -20,37 +20,61 @@ internal class DiagnosticArchive(
     private val usableSpace: () -> Long = { root.usableSpace },
 ) {
     private val directory = File(root, "archive")
-    private var current: String? = null
+    private data class ActiveRun(val session: String?, val attempt: String = "unknown")
+    private val activeRun = java.util.concurrent.atomic.AtomicReference(ActiveRun(null))
+    private var current: String?
+        get() = activeRun.get().session
+        set(value) { activeRun.set(ActiveRun(value)) }
     private val parts = mutableMapOf<String, Int>()
     private var lastWall = wall()
     private var lastMono = monotonic()
     private var clockValid = validWall(lastWall)
     private var lastException = Long.MIN_VALUE
     private var lastCleanup = Long.MIN_VALUE
-    private var attempt = "unknown"
     private var detailBytes = 0L
     private var summaryBytes = 0L
     private val invalidClockRecorded = mutableSetOf<String>()
-    private val pendingStarts = mutableMapOf<String, ByteArray>()
+    private val pendingStarts = linkedMapOf<String, ByteArray>()
+    private var pendingStartsDropped = 0L
+    private var metadataEntriesDropped = 0L
+    private var reportedStartDrops = 0L
+    private var reportedEntryDrops = 0L
 
-    fun start(reason: String): String = synchronized(lock) {
+    // Assignment only: callers may admit a run on the UI thread while the writer is busy.
+    fun activate(session: String) {
+        activeRun.updateAndGet { if (it.session == session) it else ActiveRun(session) }
+    }
+
+    fun start(reason: String, id: String = UUID.randomUUID().toString(), startedWall: Long = wall(),
+        startedMono: Long = monotonic(), makeCurrent: Boolean = true): String = synchronized(lock) {
         directory.mkdirs()
         migrateLegacy()
-        val id = UUID.randomUUID().toString()
-        current = id; parts[id] = 0
-        val metadata = "session=$id process=$processId wallMs=${wall()} timezone=${TimeZone.getDefault().id} monotonicMs=${monotonic()} clockValid=$clockValid reason=${reason.take(1024)}\n"
+        require(id.matches(sessionPattern))
+        if (makeCurrent) current = id
+        parts[id] = 0
+        val metadata = "session=$id process=$processId wallMs=$startedWall timezone=${TimeZone.getDefault().id} monotonicMs=$startedMono clockValid=${clockValid && validWall(startedWall)} reason=${reason.take(1024)}\n"
         pendingStarts[id] = metadata.toByteArray()
-        val admitted = ensureMetadata(id)
+        if (pendingStarts.size > 64) {
+            pendingStarts.remove(pendingStarts.keys.first())
+            pendingStartsDropped++
+        }
+        ensureMetadata(id)
         if (!clockValid) invalidClockRecorded.add(id)
-        if (admitted) summary(id, metadata + "Tail durability: asynchronous queue; sudden process/power loss may lose queued or filesystem-buffered tail.")
         cleanup()
         id
     }
 
     fun append(session: String, original: String) = synchronized(lock) {
         require(session.matches(sessionPattern))
-        if (!ensureMetadata(session)) { event("detail_dropped session_metadata_unavailable session=$session"); return@synchronized }
-        Regex("attempt(?:Id)?=([^ \n]+)").find(original)?.groupValues?.get(1)?.let { attempt = it }
+        if (!ensureMetadata(session)) {
+            metadataEntriesDropped++
+            event("detail_dropped session_metadata_unavailable session=$session")
+            return@synchronized
+        }
+        reportPendingLoss()
+        Regex("attempt(?:Id)?=([^ \n]+)").find(original)?.groupValues?.get(1)?.let { attempt ->
+            activeRun.updateAndGet { if (it.session == session) it.copy(attempt = attempt) else it }
+        }
         val now = wall(); val mono = monotonic()
         val delta = now - lastWall - (mono - lastMono)
         if (!validWall(now) || kotlin.math.abs(delta) > 300_000 || now < lastWall) {
@@ -110,19 +134,17 @@ internal class DiagnosticArchive(
         else event("legacy_rotation_dropped low_space file=${source.name}")
     }
 
-    fun correlation(): String = synchronized(lock) { "process=$processId session=${current ?: "none"} attempt=$attempt wallMs=${wall()} monotonicMs=${monotonic()} timezone=${TimeZone.getDefault().id} clockValid=$clockValid" }
+    fun correlation(): String = synchronized(lock) {
+        val run = activeRun.get()
+        "process=$processId session=${run.session ?: "none"} attempt=${run.attempt} wallMs=${wall()} monotonicMs=${monotonic()} timezone=${TimeZone.getDefault().id} clockValid=$clockValid"
+    }
 
     fun capture(text: String, captureId: String, startingSession: String? = null) = synchronized(lock) {
         directory.mkdirs()
         val id = when {
             startingSession?.matches(sessionPattern) == true -> startingSession
-            startingSession != null -> {
-                val previous = current
-                val detached = start("manual_network_capture_without_live_session")
-                current = previous
-                detached
-            }
-            else -> current ?: start("manual_network_capture")
+            startingSession != null -> start("manual_network_capture_without_live_session", makeCurrent = false)
+            else -> current ?: start("manual_network_capture", makeCurrent = false)
         }
         if (!ensureMetadata(id)) {
             if (id in pendingStarts || !writeAdmitted(File(directory, "$id.meta"), "session=$id wallMs=0 clockValid=false reason=capture_start_metadata_unavailable\n".toByteArray()))
@@ -142,7 +164,7 @@ internal class DiagnosticArchive(
         val valid: Boolean
         synchronized(lock) {
             require(selection in ranges || selection.matches(sessionPattern)) { "Invalid archive selection" }
-            directory.mkdirs(); migrateLegacy(); pendingStarts.keys.toList().forEach { ensureMetadata(it) }; cleanup()
+            directory.mkdirs(); migrateLegacy(); pendingStarts.keys.toList().forEach { ensureMetadata(it) }; reportPendingLoss(); cleanup()
             cutoff = wall(); valid = clockValid && validWall(cutoff)
             require(valid || selection == "all" || selection.matches(sessionPattern)) { "Device date is unreliable; choose all or a session" }
             val sessions = directory.listFiles().orEmpty().filter { it.extension == "meta" }.filter { meta ->
@@ -170,7 +192,7 @@ internal class DiagnosticArchive(
             ZipOutputStream(destination.outputStream().buffered(32 * 1024)).use { zip ->
                 val manifest = StringBuilder("format=1 selection=$selection cutoffWallMs=$cutoff clockValid=$valid clockValidity=local_plausibility_only_no_external_time_validation process=$processId timezone=${TimeZone.getDefault().id}\n" +
                     "detailBudgetBytes=$detailBudget detailDays=7 summaryBudgetBytes=4194304 summaryDays=14 exceptionCount=8 networkCount=3 networkMaxChars=655360 reserveBytes=$reserve\n" +
-                    "rangeBasis=session_start_wall_time; for sessions spanning midnight choose all/session.\nConsistency: fixed byte prefixes; partial writes are preserved; queued tail may be missing. Unknown-date sessions are excluded from date ranges; use all/session selection.\n")
+                    "sessionUnit=controller_connection_run_or_host_setup; controller retries retain protocol attempt IDs; not an ACC/trip detector. Original recording build/startup identity is in session metadata.\nrangeBasis=session_start_wall_time; for sessions spanning midnight choose all/session.\nConsistency: fixed byte prefixes; partial writes are preserved; queued tail may be missing. Unknown-date sessions are excluded from date ranges; use all/session selection.\n")
                 for ((file, length) in selected) {
                     zip.putNextEntry(ZipEntry("logs/${file.name}"))
                     val digest = MessageDigest.getInstance("SHA-256")
@@ -243,7 +265,10 @@ internal class DiagnosticArchive(
         val metadata = pendingStarts[session]
         if (metadata != null) {
             if (!writeAdmitted(file, metadata)) return false
+            summary(session, String(metadata, Charsets.UTF_8) +
+                "Tail durability: asynchronous queue; sudden process/power loss may lose queued or filesystem-buffered tail. Metadata may be recovered after low space; missing entries are counted in maintenance.")
             pendingStarts.remove(session)
+            reportPendingLoss()
         }
         return file.isFile
     }
@@ -274,12 +299,21 @@ internal class DiagnosticArchive(
         if (!writeAdmitted(file, bytes, append = true)) { event("summary_dropped low_space session=$session"); return }
         summaryBytes += bytes.size
     }
-    private fun event(text: String) { runCatching {
+    private fun reportPendingLoss() {
+        if (pendingStartsDropped == reportedStartDrops && metadataEntriesDropped == reportedEntryDrops) return
+        if (event("metadata_loss_recovery pendingStartsDroppedTotal=$pendingStartsDropped " +
+                "metadataUnavailableEntriesDroppedTotal=$metadataEntriesDropped " +
+                "pendingStartCapacity=64 oldest_start_metadata_lost=true countsProcess=$processId")) {
+            reportedStartDrops = pendingStartsDropped
+            reportedEntryDrops = metadataEntriesDropped
+        }
+    }
+    private fun event(text: String): Boolean = runCatching {
         val file = File(directory, "maintenance.txt")
-        if (file.length() > 64 * 1024 && file.absolutePath in pins) return@runCatching
+        if (file.length() > 64 * 1024 && file.absolutePath in pins) return@runCatching false
         val value = if (file.length() > 64 * 1024) "maintenance_rotated oldest_events_removed=true\nwallMs=${wall()} $text\n" else "wallMs=${wall()} $text\n"
         writeAdmitted(file, value.toByteArray(), append = file.length() <= 64 * 1024)
-    } }
+    }.getOrDefault(false)
     private fun cleanup(detailLimit: Long = detailBudget, summaryLimit: Long = 4L * 1024 * 1024, spaceNeeded: Long = 0) {
         val all = directory.listFiles().orEmpty().filter { it.isFile }.sortedBy { it.lastModified() }
         fun prune(extension: String, budget: Long, days: Int, count: Int = Int.MAX_VALUE) {
@@ -308,7 +342,7 @@ internal class DiagnosticArchive(
         prune("exception", 8L * 66 * 1024, 14, 8)
         prune("network", 3L * 3 * 640 * 1024, 7, 3)
         // Metadata lives exactly as long as its evidence; interrupted starts do not accumulate forever.
-        all.filter { it.extension == "meta" && it.nameWithoutExtension != current }.forEach { meta ->
+        all.filter { it.extension == "meta" && it.nameWithoutExtension != current && it.nameWithoutExtension !in pendingStarts }.forEach { meta ->
             if (directory.listFiles().orEmpty().none { it != meta && it.name.startsWith(meta.nameWithoutExtension) }) meta.delete()
         }
         parts.keys.removeAll { it != current && it !in pendingStarts && !File(directory, "$it.meta").isFile }
@@ -342,6 +376,6 @@ internal class DiagnosticArchive(
             File.createTempFile("BuickPlay-code$versionCode-", ".zip", directory)
         }
         private val instances = mutableMapOf<String, DiagnosticArchive>()
-        fun forLogs(directory: File): DiagnosticArchive = synchronized(lock) { instances.getOrPut(directory.absolutePath) { DiagnosticArchive(directory) } }
+        fun forLogs(directory: File): DiagnosticArchive = synchronized(instances) { instances.getOrPut(directory.absolutePath) { DiagnosticArchive(directory) } }
     }
 }

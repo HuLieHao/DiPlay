@@ -13,7 +13,7 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.TextView
 import com.shilapi.xcertplay.host.R
-import java.text.DateFormat
+import android.text.format.DateFormat
 import java.util.Date
 
 /** Local head-unit system clock. Never represents an iPhone clock or changes the video viewport. */
@@ -49,7 +49,7 @@ internal class CarPlayClockOverlay(
             if (!running) return
             val now = systemTime()
             text = if (now < VALID_SYSTEM_TIME_MS) context.getString(R.string.settings_clock_unknown)
-                else DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(now))
+                else DateFormat.getTimeFormat(context).format(Date(now))
             handler.postDelayed(this, MINUTE_MS - Math.floorMod(now, MINUTE_MS))
         }
     }

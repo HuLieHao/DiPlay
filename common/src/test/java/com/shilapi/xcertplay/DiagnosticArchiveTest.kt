@@ -6,6 +6,110 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DiagnosticArchiveTest {
+    @Test fun summaryBudgetCleanupCannotUnlinkMetadataBeingAdmittedForAnOlderQueuedRun() {
+        val root = Files.createTempDirectory("pending-summary-prune").toFile()
+        try {
+            val archive = DiagnosticArchive(root, reserve = 0)
+            val old = archive.start("old")
+            root.resolve("archive/$old.summary").writeBytes(ByteArray(4 * 1024 * 1024) { 120 })
+            archive.export(root.resolve("initial.zip"), "all", "metadata") // refresh budget accounting
+            archive.activate(java.util.UUID.randomUUID().toString()) // a newer UI-admitted target
+            val queued = archive.start("older queued run", makeCurrent = false)
+            archive.append(queued, "original from queued connection")
+            archive.export(root.resolve("queued.zip"), queued, "metadata")
+            ZipFile(root.resolve("queued.zip")).use { zip ->
+                assertNotNull("summary pruning must not orphan the admitted run", zip.getEntry("logs/$queued.meta"))
+                assertTrue(zip.entries().asSequence().filter { it.name.endsWith(".log") }
+                    .any { zip.getInputStream(it).bufferedReader().readText().contains("original from queued connection") })
+            }
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun detachedCaptureCannotRestoreAnObsoleteRunOverNewUiAdmission() {
+        val root = Files.createTempDirectory("capture-ui-admission").toFile()
+        try {
+            var activateDuringWrite = false
+            val next = java.util.UUID.randomUUID().toString()
+            lateinit var archive: DiagnosticArchive
+            archive = DiagnosticArchive(root, reserve = 0, usableSpace = {
+                if (activateDuringWrite) { activateDuringWrite = false; archive.activate(next) }
+                10_000_000L
+            })
+            archive.start("previous run")
+            activateDuringWrite = true
+            assertTrue(archive.capture("original detached capture", "capture", "none"))
+            assertTrue("capture completion must preserve the newer admitted connection", archive.correlation().contains("session=$next "))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun retainedRunBookkeepingRetiresWhenItsEvidenceExpires() {
+        val root = Files.createTempDirectory("run-bookkeeping").toFile()
+        try {
+            var now = 1_800_000_000_000L
+            val archive = DiagnosticArchive(root, wall = { now }, reserve = 0)
+            val ids = (1..12).map { archive.start("run $it").also { id -> archive.append(id, "CONNECTION_DIAGNOSTIC original") } }
+            now += 15 * 86_400_000L
+            val current = archive.start("after retention")
+            val parts = DiagnosticArchive::class.java.getDeclaredField("parts").apply { isAccessible = true }.get(archive) as Map<*, *>
+            assertEquals(setOf(current), parts.keys)
+            assertTrue(ids.none { root.resolve("archive/$it.meta").exists() })
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun dateSelectionUsesAdmittedRunDateAndOldTailDoesNotReplaceCurrentAttempt() {
+        val root = Files.createTempDirectory("connection-run-dates").toFile()
+        val oldZone = java.util.TimeZone.getDefault()
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
+        try {
+            val now = 1_800_018_000_000L
+            val archive = DiagnosticArchive(root, wall = { now }, monotonic = { 1000L }, reserve = 0)
+            val outbound = archive.start("outbound", startedWall = now - 86_400_000L, startedMono = 100L)
+            archive.append(outbound, "CONNECTION_DIAGNOSTIC attempt=1 outbound original")
+            val returned = archive.start("return", startedWall = now, startedMono = 200L)
+            archive.append(returned, "CONNECTION_DIAGNOSTIC attempt=2 return original")
+            archive.append(outbound, "CONNECTION_DIAGNOSTIC attempt=1 outbound old tail")
+            assertTrue(archive.correlation().contains("session=$returned attempt=2"))
+            archive.capture("network evidence", "current-capture")
+            assertTrue(root.resolve("archive").listFiles()!!.single { it.extension == "network" }.name.startsWith(returned))
+            for ((selection, wanted, unwanted) in listOf(Triple("yesterday", outbound, returned), Triple("today", returned, outbound))) {
+                val zip = archive.export(root.resolve("$selection.zip"), selection, "metadata")
+                ZipFile(zip).use { bundle ->
+                    assertNotNull(bundle.getEntry("logs/$wanted.meta"))
+                    assertNull(bundle.getEntry("logs/$unwanted.meta"))
+                }
+            }
+        } finally { java.util.TimeZone.setDefault(oldZone); root.deleteRecursively() }
+    }
+
+    @Test fun lowSpaceRepeatedStartsHaveBoundedMemoryAndReportLossAfterRecovery() {
+        val root = Files.createTempDirectory("pending-starts-bounded").toFile()
+        try {
+            var space = 0L
+            val archive = DiagnosticArchive(root, reserve = 1000, usableSpace = { space })
+            val ids = (1..200).map { archive.start("connection run $it") }
+            ids.forEach { archive.append(it, "original while full") }
+            val pending = DiagnosticArchive::class.java.getDeclaredField("pendingStarts").apply { isAccessible = true }.get(archive) as Map<*, *>
+            assertTrue("low space must not retain unbounded start metadata", pending.size <= 64)
+            val parts = DiagnosticArchive::class.java.getDeclaredField("parts").apply { isAccessible = true }.get(archive) as Map<*, *>
+            val clockMarks = DiagnosticArchive::class.java.getDeclaredField("invalidClockRecorded").apply { isAccessible = true }.get(archive) as Set<*>
+            assertTrue(parts.size <= 64)
+            assertTrue(clockMarks.size <= 64)
+            space = 10_000_000L
+            archive.append(ids.last(), "original after recovery")
+            val zip = archive.export(root.resolve("recovered.zip"), "all", "metadata")
+            ZipFile(zip).use { bundle ->
+                val maintenance = bundle.getInputStream(bundle.getEntry("logs/maintenance.txt")).bufferedReader().readText()
+                assertTrue(maintenance.contains("pendingStartsDroppedTotal=136"))
+                assertTrue(maintenance.contains("metadataUnavailableEntriesDroppedTotal=200"))
+                assertTrue(bundle.entries().asSequence().filter { it.name.endsWith(".log") }
+                    .any { bundle.getInputStream(it).bufferedReader().readText().contains("original after recovery") })
+                assertTrue(bundle.entries().asSequence().count { it.name.endsWith(".meta") } <= 64)
+            }
+            assertEquals(64, archive.sessions().size)
+            assertTrue(pending.isEmpty())
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun sessionStartedBelowReserveRecoversOriginalMetadataAndExportsNewEvidence() {
         val root = Files.createTempDirectory("start-recovery").toFile()
         try {

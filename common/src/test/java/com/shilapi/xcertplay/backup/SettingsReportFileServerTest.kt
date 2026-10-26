@@ -28,6 +28,47 @@ class SettingsReportFileServerTest {
         assertFalse("temporary report survives completed transfer", file.exists())
     }
 
+    @Test fun repeatedArchiveDownloadsReleaseSnapshotsAndPreserveBoundedOriginalEvidence() {
+        val root = Files.createTempDirectory("archive-download-cycles").toFile()
+        val exports = root.resolve("exports").apply { mkdirs() }
+        val logs = root.resolve("logs").apply { mkdirs() }
+        val archive = com.shilapi.xcertplay.DiagnosticArchive(logs, detailBudget = 2048, partBytes = 128, reserve = 0)
+        try {
+            repeat(12) { cycle ->
+                val id = archive.start("connection cycle $cycle")
+                archive.append(id, "CONNECTION_DIAGNOSTIC original-$cycle " + "x".repeat(700))
+                archive.capture("original snapshot $cycle", "capture-$cycle", id)
+                val owned = java.util.concurrent.atomic.AtomicReference<File>()
+                val service = SettingsBackupServer(page = byteArrayOf(), export = { byteArrayOf() },
+                    import = { SettingsImportOutcome(0, 0, invalid = false) },
+                    archiveReport = { selection ->
+                        val file = com.shilapi.xcertplay.DiagnosticArchive.newExportFile(exports, 47)
+                        archive.export(file, selection, "cycle=$cycle").also { owned.set(it) }
+                    })
+                val endpoint = service.start()!!
+                try {
+                    val connection = request(endpoint, "/b/${endpoint.token}/report?selection=$id")
+                    assertEquals(200, connection.responseCode)
+                    val received = root.resolve("received.zip")
+                    connection.inputStream.use { input -> received.outputStream().use { input.copyTo(it) } }
+                    connection.disconnect()
+                    awaitDeleted(owned.get())
+                    java.util.zip.ZipFile(received).use { zip ->
+                        assertTrue(zip.entries().asSequence().filter { it.name.endsWith(".log") }
+                            .any { zip.getInputStream(it).bufferedReader().readText().contains("original-$cycle") })
+                        assertTrue(zip.getEntry("logs/$id.meta") != null)
+                    }
+                    received.delete()
+                    assertTrue(exports.listFiles()!!.isEmpty())
+                    val originals = logs.resolve("archive").listFiles()!!
+                    assertTrue(originals.filter { it.extension == "log" }.sumOf { it.length() } <= 2048)
+                    assertTrue(originals.count { it.extension == "network" } <= 3)
+                    assertTrue(originals.any { it.name.startsWith(id) && it.extension == "log" })
+                } finally { service.stop() }
+            }
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun validatesRangeBeforeGeneratingSelectedArchive() {
         val directory = Files.createTempDirectory("selected-report").toFile()
         val selected = mutableListOf<String>()
