@@ -6,6 +6,54 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DiagnosticArchiveTest {
+    @Test fun sessionStartedBelowReserveRecoversOriginalMetadataAndExportsNewEvidence() {
+        val root = Files.createTempDirectory("start-recovery").toFile()
+        try {
+            var now = 1_800_000_000_000L
+            var available = 1000L
+            val archive = DiagnosticArchive(root, wall = { now }, reserve = 1000, usableSpace = { available })
+            val id = archive.start("original start")
+            archive.append(id, "cannot fit")
+            available = 1_000_000L
+            now += 1000
+            archive.append(id, "recovered original evidence")
+            val zip = archive.export(root.resolve("recovered.zip"), "all", "metadata")
+            ZipFile(zip).use { bundle ->
+                val logs = bundle.entries().asSequence().filter { it.name.endsWith(".log") }
+                    .map { bundle.getInputStream(it).bufferedReader().readText() }.toList()
+                assertTrue(logs.any { it.contains("recovered original evidence") })
+                val meta = bundle.getEntry("logs/$id.meta")
+                assertNotNull(meta)
+                val text = bundle.getInputStream(meta).bufferedReader().readText()
+                assertTrue(text.contains("wallMs=1800000000000"))
+                assertTrue(text.contains("reason=original start"))
+            }
+        } finally { root.deleteRecursively() }
+    }
+    @Test fun partialLegacyMigrationRetriesAfterRecoveryWithoutDuplicateOrTruncatedCopies() {
+        val root = Files.createTempDirectory("migration-recovery").toFile()
+        try {
+            val originals = mapOf("previous.log" to "small original", "previous-2.log" to "large original".repeat(1000))
+            originals.forEach { (name, text) -> root.resolve(name).writeText(text) }
+            var capacity = root.walkTopDown().filter { it.isFile }.sumOf { it.length() } + 2500
+            fun available() = capacity - root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            DiagnosticArchive(root, reserve = 1000, usableSpace = ::available).start("low space")
+            assertEquals(1, root.resolve("archive").listFiles()!!.count { it.name.contains("-legacy-") && it.extension == "log" })
+            capacity += 1_000_000
+            val recovered = DiagnosticArchive(root, reserve = 1000, usableSpace = ::available)
+            val zip = recovered.export(root.resolve("recovered.zip"), "all", "metadata")
+            ZipFile(zip).use { bundle ->
+                val logs = bundle.entries().asSequence().filter { it.name.contains("-legacy-") && it.name.endsWith(".log") }.toList()
+                assertEquals(2, logs.size)
+                originals.forEach { (name, text) ->
+                    val entry = logs.single { it.name.endsWith("-legacy-$name") }
+                    assertEquals(text, bundle.getInputStream(entry).bufferedReader().readText())
+                }
+            }
+            recovered.export(root.resolve("again.zip"), "all", "metadata")
+            assertEquals(2, root.resolve("archive").listFiles()!!.count { it.name.contains("-legacy-") && it.extension == "log" })
+        } finally { root.deleteRecursively() }
+    }
     @Test fun legacyMirrorsCannotBypassReserveAdmission() {
         val root = Files.createTempDirectory("mirror-reserve").toFile()
         try {

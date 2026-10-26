@@ -31,6 +31,7 @@ internal class DiagnosticArchive(
     private var detailBytes = 0L
     private var summaryBytes = 0L
     private val invalidClockRecorded = mutableSetOf<String>()
+    private val pendingStarts = mutableMapOf<String, ByteArray>()
 
     fun start(reason: String): String = synchronized(lock) {
         directory.mkdirs()
@@ -38,15 +39,17 @@ internal class DiagnosticArchive(
         val id = UUID.randomUUID().toString()
         current = id; parts[id] = 0
         val metadata = "session=$id process=$processId wallMs=${wall()} timezone=${TimeZone.getDefault().id} monotonicMs=${monotonic()} clockValid=$clockValid reason=${reason.take(1024)}\n"
-        writeAdmitted(File(directory, "$id.meta"), metadata.toByteArray())
+        pendingStarts[id] = metadata.toByteArray()
+        val admitted = ensureMetadata(id)
         if (!clockValid) invalidClockRecorded.add(id)
-        summary(id, metadata + "Tail durability: asynchronous queue; sudden process/power loss may lose queued or filesystem-buffered tail.")
+        if (admitted) summary(id, metadata + "Tail durability: asynchronous queue; sudden process/power loss may lose queued or filesystem-buffered tail.")
         cleanup()
         id
     }
 
     fun append(session: String, original: String) = synchronized(lock) {
         require(session.matches(sessionPattern))
+        if (!ensureMetadata(session)) { event("detail_dropped session_metadata_unavailable session=$session"); return@synchronized }
         Regex("attempt(?:Id)?=([^ \n]+)").find(original)?.groupValues?.get(1)?.let { attempt = it }
         val now = wall(); val mono = monotonic()
         val delta = now - lastWall - (mono - lastMono)
@@ -121,8 +124,10 @@ internal class DiagnosticArchive(
             }
             else -> current ?: start("manual_network_capture")
         }
-        if (!File(directory, "$id.meta").isFile)
-            writeAdmitted(File(directory, "$id.meta"), "session=$id wallMs=0 clockValid=false reason=capture_start_metadata_unavailable\n".toByteArray())
+        if (!ensureMetadata(id)) {
+            if (id in pendingStarts || !writeAdmitted(File(directory, "$id.meta"), "session=$id wallMs=0 clockValid=false reason=capture_start_metadata_unavailable\n".toByteArray()))
+                return@synchronized false
+        }
         val file = File(directory, "$id-${UUID.randomUUID()}.network")
         val bytes = ("captureId=$captureId captureSession=$id captureEnd ${correlation()}\n" + text.take(640 * 1024)).toByteArray(Charsets.UTF_8)
         if (!writeAdmitted(file, bytes)) { event("capture_dropped low_space captureId=$captureId session=$id"); return@synchronized false }
@@ -137,7 +142,7 @@ internal class DiagnosticArchive(
         val valid: Boolean
         synchronized(lock) {
             require(selection in ranges || selection.matches(sessionPattern)) { "Invalid archive selection" }
-            directory.mkdirs(); migrateLegacy(); cleanup()
+            directory.mkdirs(); migrateLegacy(); pendingStarts.keys.toList().forEach { ensureMetadata(it) }; cleanup()
             cutoff = wall(); valid = clockValid && validWall(cutoff)
             require(valid || selection == "all" || selection.matches(sessionPattern)) { "Device date is unreliable; choose all or a session" }
             val sessions = directory.listFiles().orEmpty().filter { it.extension == "meta" }.filter { meta ->
@@ -206,13 +211,41 @@ internal class DiagnosticArchive(
         val networks = File(root.parentFile, "hotspot-network-diagnostics").listFiles().orEmpty()
             .filter { it.isFile && it.name in setOf("latest.txt", "previous-1.txt", "previous-2.txt") }
         if (legacy.isNotEmpty() || networks.isNotEmpty()) {
-            val id = UUID.randomUUID().toString()
-            writeTextAdmitted(File(directory, "$id.meta"), "session=$id process=legacy wallMs=0 clockValid=false reason=legacy_migration unknown_original_dates=true\n")
-            writeTextAdmitted(File(directory, "$id.summary"), "Legacy retained logs migrated unchanged; dates and original session boundaries unknown; choose all or session.\n")
-            legacy.forEach { if (hasSpace(it.length())) it.copyTo(File(directory, "$id-legacy-${it.name}")) else event("legacy_migration_dropped low_space file=${it.name}") }
-            networks.forEach { if (hasSpace(it.length())) it.copyTo(File(directory, "$id-legacy-${it.nameWithoutExtension}.network")) else event("legacy_migration_dropped low_space file=${it.name}") }
+            // Reuse the incomplete migration's identity, including after process recreation.
+            val id = directory.listFiles().orEmpty().firstOrNull {
+                it.extension == "meta" && readMetadata(it).contains("reason=legacy_migration")
+            }?.nameWithoutExtension ?: UUID.randomUUID().toString()
+            val meta = File(directory, "$id.meta")
+            if (!meta.isFile && !writeTextAdmitted(meta, "session=$id process=legacy wallMs=0 clockValid=false reason=legacy_migration unknown_original_dates=true\n")) return
+            val summary = File(directory, "$id.summary")
+            if (!summary.isFile && !writeTextAdmitted(summary, "Legacy retained logs migrated unchanged; dates and original session boundaries unknown; choose all or session.\n")) return
+            var complete = true
+            val copies = legacy.map { it to File(directory, "$id-legacy-${it.name}") } +
+                networks.map { it to File(directory, "$id-legacy-${it.nameWithoutExtension}.network") }
+            copies.forEach { (source, destination) ->
+                if (!destination.isFile || destination.length() != source.length()) {
+                    if (hasSpace(source.length())) {
+                        try { source.copyTo(destination, overwrite = true) }
+                        catch (failure: IOException) { destination.delete(); throw failure }
+                    } else {
+                        complete = false
+                        event("legacy_migration_dropped low_space file=${source.name}")
+                    }
+                }
+            }
+            if (!complete) return
         }
         writeTextAdmitted(marker, "Legacy migration completed; original legacy files retained.\n")
+    }
+
+    private fun ensureMetadata(session: String): Boolean {
+        val file = File(directory, "$session.meta")
+        val metadata = pendingStarts[session]
+        if (metadata != null) {
+            if (!writeAdmitted(file, metadata)) return false
+            pendingStarts.remove(session)
+        }
+        return file.isFile
     }
 
     private fun hasSpace(bytes: Long): Boolean = bytes >= 0 && usableSpace() - bytes >= reserve
@@ -278,7 +311,7 @@ internal class DiagnosticArchive(
         all.filter { it.extension == "meta" && it.nameWithoutExtension != current }.forEach { meta ->
             if (directory.listFiles().orEmpty().none { it != meta && it.name.startsWith(meta.nameWithoutExtension) }) meta.delete()
         }
-        parts.keys.removeAll { it != current && !File(directory, "$it.meta").isFile }
+        parts.keys.removeAll { it != current && it !in pendingStarts && !File(directory, "$it.meta").isFile }
         invalidClockRecorded.removeAll { it != current && !File(directory, "$it.meta").isFile }
     }
     private fun inRange(time: Long, selection: String, now: Long): Boolean {
