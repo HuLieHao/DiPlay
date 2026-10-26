@@ -101,6 +101,18 @@ class NextDriverUiScreenshotsTest {
                             if (ink.getPixel(x, y) == clock.currentTextColor) visibleTextPixels++
                         }
                         assertTrue("Clock must draw legible text: ${clock.text}", visibleTextPixels > 0)
+                        for (row in 0..2) {
+                            val expected = if (row == 1) android.graphics.Color.YELLOW else android.graphics.Color.WHITE
+                            val top = ink.height * row / 3
+                            val bottom = ink.height * (row + 1) / 3
+                            var glyphPixels = 0
+                            for (y in top until bottom) for (x in 0 until ink.width) {
+                                if (ink.getPixel(x, y) == expected) glyphPixels++
+                            }
+                            assertTrue("Comparison row $row must render its time", glyphPixels > 0)
+                        }
+                        assertEquals(android.graphics.Color.TRANSPARENT, ink.getPixel(0, 0))
+                        assertEquals(android.graphics.Color.BLACK, ink.getPixel(0, ink.height - 1))
                     } finally { ink.recycle() }
                     assertTrue(clock.left >= 0 && clock.right <= root.width)
                     assertTrue(clock.top >= 0 && clock.bottom <= root.height)

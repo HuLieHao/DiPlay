@@ -557,7 +557,7 @@ class CarPlayHostDisplaySizeTest {
         val content = CarPlayVideoLayout.fit(1920, 990, 1920, 942)
         val params = clock.layoutParams as android.widget.FrameLayout.LayoutParams
         assertEquals((content.left + 10).toInt(), params.leftMargin)
-        assertEquals((20 + content.top + content.height * (1f - 146f / 858f)).toInt(), params.topMargin)
+        assertEquals((20 + content.top + content.height * (1f - 258f / 858f)).toInt(), params.topMargin)
         assertEquals(32f * content.height / 858f, clock.textSize, .01f)
     }
 

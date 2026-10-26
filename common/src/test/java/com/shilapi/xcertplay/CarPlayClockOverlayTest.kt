@@ -73,10 +73,12 @@ class CarPlayClockOverlayTest {
         val params = overlay.layoutParams as FrameLayout.LayoutParams
         assertEquals(118, params.width)
         assertEquals(20, params.leftMargin)
-        assertEquals(812, params.topMargin)
+        assertEquals(700, params.topMargin)
+        assertEquals(168, params.height)
+        assertEquals(868, params.topMargin + params.height)
         assertEquals(32f, overlay.textSize, .01f)
         assertEquals(android.graphics.Color.WHITE, overlay.currentTextColor)
-        assertEquals(android.graphics.Color.BLACK, (overlay.background as android.graphics.drawable.ColorDrawable).color)
+        assertEquals(android.graphics.Color.TRANSPARENT, (overlay.background as android.graphics.drawable.ColorDrawable).color)
         assertEquals(0f, overlay.shadowRadius, .01f)
         val originalScaledDensity = activity.resources.displayMetrics.scaledDensity
         activity.resources.displayMetrics.scaledDensity = 3f

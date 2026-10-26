@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.RectF
@@ -37,6 +39,7 @@ internal class CarPlayClockOverlay(
     private val handler: Handler,
     private val systemTime: () -> Long = System::currentTimeMillis,
 ) : TextView(context) {
+    private val comparisonPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private var contentBounds = RectF()
     private var running = false
     private var registered = false
@@ -70,7 +73,7 @@ internal class CarPlayClockOverlay(
         ellipsize = null
         includeFontPadding = false
         setPadding(0, 0, 0, 0)
-        setBackgroundColor(Color.BLACK)
+        setBackgroundColor(Color.TRANSPARENT)
     }
     fun update(visible: Boolean, night: Boolean) {
         visiblePage = visible
@@ -129,8 +132,8 @@ internal class CarPlayClockOverlay(
         // Scale with video height, cap the sidebar to the visible width for narrow layouts.
         val scale = contentBounds.height().coerceAtLeast(0f) / 858f
         val dockWidth = (118f * scale).coerceAtMost(contentBounds.width().coerceAtLeast(0f))
-        val clockHeight = (56f * scale).coerceAtMost(contentBounds.height().coerceAtLeast(0f))
-        val top = (contentBounds.bottom - 146f * scale)
+        val clockHeight = (168f * scale).coerceAtMost(contentBounds.height().coerceAtLeast(0f))
+        val top = (contentBounds.bottom - 258f * scale)
             .coerceAtLeast(contentBounds.top)
         setTextSize(TypedValue.COMPLEX_UNIT_PX, 32f * scale * CarPlayClockSettings.size(context) / 20f)
         // Preserve all five HH:mm characters even for the largest preference or narrow video.
@@ -142,6 +145,25 @@ internal class CarPlayClockOverlay(
         layoutParams = FrameLayout.LayoutParams(dockWidth.toInt(), clockHeight.toInt(), Gravity.TOP or Gravity.LEFT).apply {
             leftMargin = (if (position == "right") contentBounds.right - dockWidth else contentBounds.left).toInt()
             topMargin = top.toInt()
+        }
+    }
+    /** Temporary three-style comparison: one time source and one minute callback for all rows. */
+    override fun onDraw(canvas: Canvas) {
+        val rowHeight = height / 3f
+        val label = text.toString()
+        comparisonPaint.set(paint)
+        comparisonPaint.textAlign = Paint.Align.CENTER
+        val baselineOffset = -(comparisonPaint.ascent() + comparisonPaint.descent()) / 2f
+        for (row in 0..2) {
+            comparisonPaint.clearShadowLayer()
+            if (row == 2) {
+                comparisonPaint.color = Color.BLACK
+                canvas.drawRect(0f, rowHeight * 2f, width.toFloat(), height.toFloat(), comparisonPaint)
+            } else {
+                comparisonPaint.setShadowLayer(3f * contentBounds.height() / 858f, 0f, 0f, Color.BLACK)
+            }
+            comparisonPaint.color = if (row == 1) Color.YELLOW else Color.WHITE
+            canvas.drawText(label, width / 2f, rowHeight * (row + .5f) + baselineOffset, comparisonPaint)
         }
     }
     companion object {
