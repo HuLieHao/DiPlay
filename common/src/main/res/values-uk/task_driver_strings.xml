@@ -1,0 +1,12 @@
+<resources>
+    <string name="task_connection_management">Керування підключенням</string>
+    <string name="task_carplay">CarPlay</string>
+    <string name="settings_clock">Системний годинник</string>
+    <string name="settings_clock_off">Вимкнено</string>
+    <string name="settings_clock_left">Внизу ліворуч</string>
+    <string name="settings_clock_right">Внизу праворуч</string>
+    <string name="settings_clock_size">Розмір годинника</string>
+    <string name="settings_clock_description">Використовує системний час головного пристрою, а не iPhone. Зміни діють після повернення до CarPlay. Залишено місце для Dock; перевірте положення на стоянці.</string>
+    <string name="settings_clock_unknown">Час невідомий —</string>
+    <string name="settings_phone_power_unavailable">Батарея та заряджання iPhone: недоступні</string>
+</resources>

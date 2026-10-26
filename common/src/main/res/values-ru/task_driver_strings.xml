@@ -1,0 +1,12 @@
+<resources>
+    <string name="task_connection_management">Управление подключением</string>
+    <string name="task_carplay">CarPlay</string>
+    <string name="settings_clock">Системные часы</string>
+    <string name="settings_clock_off">Выключено</string>
+    <string name="settings_clock_left">Снизу слева</string>
+    <string name="settings_clock_right">Снизу справа</string>
+    <string name="settings_clock_size">Размер часов</string>
+    <string name="settings_clock_description">Используется системное время головного устройства, а не iPhone. Изменения применяются при возврате в CarPlay. Оставлено место для Dock; проверьте положение на стоянке.</string>
+    <string name="settings_clock_unknown">Время неизвестно —</string>
+    <string name="settings_phone_power_unavailable">Батарея и зарядка iPhone: недоступны</string>
+</resources>

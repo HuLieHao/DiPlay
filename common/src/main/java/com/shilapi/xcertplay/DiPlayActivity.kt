@@ -376,6 +376,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppTaskIdentity.apply(this, carPlay = false)
         // Back on the home page finishes this activity while the session runs on, so the icon lands here.
         if (savedInstanceState == null && isLauncherIntent(intent) && CarPlayBackgroundSession.hasSession()) {
             openProjection(); finish(); return
@@ -948,6 +949,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         card.addView(homeCardTitle)
         status = label(getString(R.string.ready_when_you_are), 24, TEXT, true).apply { setPadding(0, dp(10), 0, dp(16)) }
         card.addView(status)
+        card.addView(label(getString(R.string.settings_phone_power_unavailable), 14, MUTED))
         connectButton = homeButton(getString(R.string.connect_phone), true) {
             if (CarPlayBackgroundSession.hasSession()) openProjection()
             else connect(true)
@@ -972,7 +974,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 !CarHotspotSetup.isBydHeadUnit(this) && CarHotspotTethering.appStartSupported()
             card.addView(label(if (allowOnSystemScreen) getString(R.string.settings_write_settings_missing)
                 else hotspotResultText(startupProblem), 15, WARNING))
-            if (!compact) card.addView(
+            card.addView(
                 if (allowOnSystemScreen) homeButton(getString(R.string.settings_write_settings_allow), false) { openWriteSettingsAccess() }
                 else homeButton(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() },
                 matchButton(CONTROL_GAP_DP, 56))
@@ -981,7 +983,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             val name = AirPlayPersistence.loadManualHotspotSsid(this)
             val off = if (name.isBlank()) getString(R.string.hotspot_details_off) else getString(R.string.msg_car_hotspot_off, name)
             card.addView(label(off, 15, WARNING).apply { setPadding(0, dp(14), 0, 0) })
-            if (!compact) card.addView(homeButton(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() }, matchButton(CONTROL_GAP_DP, 56))
+            card.addView(homeButton(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() }, matchButton(CONTROL_GAP_DP, 56))
         }
         card.addView(homeButton(getString(R.string.choose_iphone), false) { choosePhone() }, matchButton(if (compact) CONTROL_GAP_DP else 16, if (compact) 46 else 56))
         disconnectButton = homeButton(getString(R.string.disconnect), false) {
@@ -1727,6 +1729,21 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
     }
 
+    private fun clockSettings(card: LinearLayout) {
+        choice(card, getString(R.string.settings_clock),
+            listOf(getString(R.string.settings_clock_off), getString(R.string.settings_clock_left), getString(R.string.settings_clock_right)),
+            CarPlayClockSettings.positions.indexOf(CarPlayClockSettings.position(this)), reconnects = false, adaptiveHeight = true) {
+            CarPlayClockSettings.save(this, position = CarPlayClockSettings.positions[it])
+        }
+        choice(card, getString(R.string.settings_clock_size), CarPlayClockSettings.sizes.map { "$it sp" },
+            CarPlayClockSettings.sizes.indexOf(CarPlayClockSettings.size(this)).coerceAtLeast(0), reconnects = false, adaptiveHeight = true) {
+            CarPlayClockSettings.save(this, size = CarPlayClockSettings.sizes[it])
+        }
+        card.addView(label(getString(R.string.settings_clock_description), 14, MUTED).apply {
+            setPadding(0, dp(SETTINGS_BLOCK_GAP_DP), 0, dp(SETTINGS_BLOCK_GAP_DP))
+        })
+    }
+
     private fun allSettingsSections(content: LinearLayout) {
         filteredSection(content, SettingsSection.CARPLAY_CONTROLS,
             getString(R.string.carplay_controls), R.drawable.ic_dp_controls) { card ->
@@ -1863,6 +1880,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (settingsSectionFilter?.contains(SettingsSection.BYD_ADB) != false) bydAdbSettings(content)
         filteredSection(content, SettingsSection.DISPLAY_AND_PERFORMANCE,
             getString(R.string.display_and_performance), R.drawable.ic_dp_display) { card ->
+            clockSettings(card)
             val appearances = AppAppearance.entries
             choice(
                 card,
@@ -6524,9 +6542,15 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     // [announcesReconnect] labels a choice whose [save] reconnects by itself.
     private fun choice(parent: LinearLayout, title: String, options: List<String>, current: Int, reconnects: Boolean = true,
-        announcesReconnect: Boolean = reconnects, enabled: Boolean = true, save: (Int) -> Unit) {
+        announcesReconnect: Boolean = reconnects, enabled: Boolean = true, adaptiveHeight: Boolean = false, save: (Int) -> Unit) {
         var selection = current
-        val button = button("$title · ${options[selection]}", false) {}.apply { isEnabled = enabled }
+        val button = button("$title · ${options[selection]}", false) {}.apply {
+            isEnabled = enabled
+            if (adaptiveHeight) {
+                tag = ADAPTIVE_CONTROL_TAG
+                minimumHeight = dp(CONTROL_HEIGHT_DP)
+            }
+        }
         button.setOnClickListener {
             var pendingSelection = selection
             appDialogBuilder().setTitle(title)
@@ -6542,8 +6566,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     }
                 }.setNegativeButton(getString(R.string.cancel), null).show()
         }
-        parent.addView(button, matchButton(0, 60)); parent.addView(space(12))
+        parent.addView(button, matchButton(0, CONTROL_HEIGHT_DP).apply {
+            if (adaptiveHeight) height = adaptiveControlHeight()
+        }); parent.addView(space(CONTROL_GAP_DP))
     }
+    private fun adaptiveControlHeight() =
+        (dp(CONTROL_HEIGHT_DP) * resources.configuration.fontScale.coerceAtLeast(1f)).roundToInt()
+
     private fun card() = column().apply { background = rounded(SURFACE, BORDER); setPadding(dp(24), dp(24), dp(24), dp(24)) }
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(-1, -2) }
     private fun row() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; layoutParams = LinearLayout.LayoutParams(-1, -2) }
@@ -6806,7 +6835,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             val lp = child.layoutParams as? LinearLayout.LayoutParams ?: continue
             when {
                 child is Button -> {
-                    lp.height = dp(CONTROL_HEIGHT_DP); lp.topMargin = 0
+                    lp.height = if (child.tag == ADAPTIVE_CONTROL_TAG) adaptiveControlHeight() else dp(CONTROL_HEIGHT_DP); lp.topMargin = 0
                     lp.bottomMargin = dp(if (isNote(next)) NOTE_ATTACH_GAP_DP else CONTROL_GAP_DP)
                 }
                 // Toggle rows carried their own vertical padding, which doubled the gap after a button.
@@ -6995,6 +7024,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         private const val VALUE_SEPARATOR = " · "
         private const val SEARCH_HIGHLIGHT_MILLIS = 900L
         private const val SPACER = "spacer"
+        private const val ADAPTIVE_CONTROL_TAG = "settings-adaptive-control"
         private const val CONTROL_HEIGHT_DP = 60
         private const val CONTROL_GAP_DP = 12
         private const val GROUP_GAP_DP = 20

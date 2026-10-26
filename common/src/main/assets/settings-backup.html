@@ -18,6 +18,9 @@ a.btn,button { display:block; width:100%; box-sizing:border-box; text-align:cent
   border-radius:999px; border:0; font-size:16px; font-weight:600; cursor:pointer; text-decoration:none;
   background:#a8c7fa; color:#0b2540; }
 button:disabled { opacity:.5; }
+#reportRange { display:block; width:100%; max-width:100%; min-width:0; min-height:48px;
+  box-sizing:border-box; margin:0 0 12px; padding:10px; border:1px solid #2a323d;
+  border-radius:12px; background:#101418; color:#e8eaed; font:inherit; }
 #result { margin-top:12px; font-size:14px; color:#9aa0a6; min-height:20px; white-space:pre-line; }
 #result.err { color:#f28b82; }
 input[type=file] { display:none; }
@@ -43,6 +46,7 @@ input[type=file] { display:none; }
     <h2 id="reportTitle"></h2>
     <p id="reportText"></p>
     <select id="reportRange" aria-label="Report selection"></select>
+    <p id="reportSelectionDetail" aria-live="polite" style="overflow-wrap:anywhere"></p>
     <a class="btn" id="reportBtn" href="report?selection=all" download></a>
     <p id="reportStatus" role="status"></p>
   </div>
@@ -137,6 +141,7 @@ $("importBtn").textContent = t.open;
 $("reportTitle").textContent = t.reportTitle;
 $("reportText").textContent = t.reportText;
 $("reportBtn").textContent = t.report;
+$("reportRange").setAttribute("aria-label", t.reportTitle);
 var rangeLabels = {"en": ["Today", "Yesterday", "Last 7 days", "All retained sessions", "Choose a session (device date may be wrong)"], "zh": ["今天", "昨天", "最近7天", "所有保留的会话", "选择会话（设备日期可能不准确）"], "zh-TW": ["今天", "昨天", "最近7天", "所有保留的工作階段", "選擇工作階段（裝置日期可能不正確）"], "es": ["Hoy", "Ayer", "Últimos 7 días", "Todas las sesiones conservadas", "Elegir sesión (la fecha puede ser incorrecta)"], "it": ["Oggi", "Ieri", "Ultimi 7 giorni", "Tutte le sessioni conservate", "Scegli sessione (la data potrebbe essere errata)"], "ru": ["Сегодня", "Вчера", "Последние 7 дней", "Все сохранённые сеансы", "Выбрать сеанс (дата может быть неверной)"], "uk": ["Сьогодні", "Учора", "Останні 7 днів", "Усі збережені сеанси", "Вибрати сеанс (дата може бути хибною)"], "ja": ["今日", "昨日", "過去7日間", "保持中の全セッション", "セッションを選択（端末の日付が不正確な場合）"], "ar": ["اليوم", "أمس", "آخر 7 أيام", "كل الجلسات المحفوظة", "اختيار جلسة (قد يكون تاريخ الجهاز خاطئًا)"]};
 var labels = rangeLabels[key] || rangeLabels.en;
 ["today", "yesterday", "7days", "all"].forEach(function(value, index) {
@@ -144,7 +149,10 @@ var labels = rangeLabels[key] || rangeLabels.en;
   $("reportRange").appendChild(option);
 });
 $("reportRange").value = "all";
-$("reportRange").addEventListener("change", function() { $("reportBtn").href = "report?selection=" + encodeURIComponent(this.value); });
+$("reportRange").addEventListener("change", function() {
+  $("reportBtn").href = "report?selection=" + encodeURIComponent(this.value);
+  $("reportSelectionDetail").textContent = this.options[this.selectedIndex].textContent;
+});
 var reportPending = {"en": "Download requested. The head unit prepares the ZIP, then sends it. Check browser Downloads for completion; if it fails, tap Download report again.", "zh": "已请求下载。车机先准备ZIP再传输；请在浏览器下载列表确认完成。若失败，请再次点击下载报告。", "zh-TW": "已要求下載。車機先準備ZIP再傳輸；請在瀏覽器下載清單確認完成。若失敗，請再次點擊下載報告。", "es": "Descarga solicitada. La unidad prepara el ZIP y lo envía. Comprueba Descargas del navegador; si falla, pulsa Descargar informe otra vez.", "it": "Download richiesto. La unità prepara lo ZIP e lo invia. Controlla i download del browser; in caso di errore riprova con Scarica report.", "ru": "Загрузка запрошена. Устройство готовит ZIP, затем передаёт его. Проверьте загрузки браузера; при ошибке нажмите скачать ещё раз.", "uk": "Завантаження запитано. Пристрій готує ZIP, потім передає його. Перевірте завантаження браузера; у разі помилки натисніть ще раз.", "ja": "ダウンロードを要求しました。車載機がZIPを作成して送信します。ブラウザーのダウンロード一覧で完了を確認し、失敗した場合は再度押してください。", "ar": "تم طلب التنزيل. يجهز الجهاز ملف ZIP ثم يرسله. تحقق من اكتماله في تنزيلات المتصفح؛ إذا فشل، اضغط تنزيل التقرير مرة أخرى."};
 $("reportBtn").addEventListener("click", function() { $("reportStatus").textContent = reportPending[key] || reportPending.en; });
 fetch("sessions").then(function(response) { if (!response.ok) throw 0; return response.text(); }).then(function(body) {

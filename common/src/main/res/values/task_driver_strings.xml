@@ -1,0 +1,12 @@
+<resources>
+    <string name="task_connection_management">Connection management</string>
+    <string name="task_carplay">CarPlay</string>
+    <string name="settings_clock">System clock</string>
+    <string name="settings_clock_off">Off</string>
+    <string name="settings_clock_left">Bottom left</string>
+    <string name="settings_clock_right">Bottom right</string>
+    <string name="settings_clock_size">Clock text size</string>
+    <string name="settings_clock_description">Uses the head unit’s system time, not the iPhone clock. Changes apply when returning to CarPlay. Insets leave room for the dock; verify placement while parked.</string>
+    <string name="settings_clock_unknown">Time unknown —</string>
+    <string name="settings_phone_power_unavailable">iPhone battery and charging: unavailable</string>
+</resources>

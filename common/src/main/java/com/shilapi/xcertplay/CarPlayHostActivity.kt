@@ -602,6 +602,7 @@ class CarPlayHostActivity : ComponentActivity() {
             initialNight = darkMode,
             onNightChanged = { night ->
                 darkMode = night
+                updateDebugOverlays()
                 if (hostAppearanceResumed) AppAppearanceRuntime.publishHost(this, night)
                 refreshAppAppearance()
                 paintWaitingScreen()
@@ -840,6 +841,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppTaskIdentity.apply(this, carPlay = true)
         val bluetoothState = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(bluetoothOnReceiver, bluetoothState, Context.RECEIVER_NOT_EXPORTED)
@@ -1183,6 +1185,7 @@ class CarPlayHostActivity : ComponentActivity() {
         super.onResume()
         WheelKeyService.restoreIfNeeded(this)
         hostAppearanceResumed = true
+        updateDebugOverlays()
         updateCallPopupGuard()
         val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         val savedThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
@@ -1820,6 +1823,7 @@ class CarPlayHostActivity : ComponentActivity() {
     override fun onPause() {
         cancelTemporarySystemBars()
         hostAppearanceResumed = false
+        clockOverlay?.update(false, darkMode)
         updateCallPopupGuard()
         AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()
@@ -1980,6 +1984,8 @@ class CarPlayHostActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    private var clockOverlay: CarPlayClockOverlay? = null
+
     private fun buildContentView(): View {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         val video = TextureView(this).apply {
@@ -1997,6 +2003,7 @@ class CarPlayHostActivity : ComponentActivity() {
             root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         }
         root.addView(gestureLayer, FrameLayout.LayoutParams(-1, -1))
+        clockOverlay = CarPlayClockOverlay(this, mainHandler).also { root.addView(it) }
         val waiting = ConnectionWaitingView(this,
             onBack = { showDiPlayHome() },
             onRetry = {
@@ -6614,6 +6621,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun updateDebugOverlays() {
+        clockOverlay?.update(hostAppearanceResumed && activeScreenStreamTypes.isNotEmpty() && !menuOpen, darkMode)
         statusScrollView?.visibility = View.GONE
         connectionPanel?.visibility = if (activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
         waitingScreen?.update(waitingProgress, wirelessEnabled)

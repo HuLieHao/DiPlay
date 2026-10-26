@@ -1,0 +1,12 @@
+<resources>
+    <string name="task_connection_management">连接管理</string>
+    <string name="task_carplay">CarPlay</string>
+    <string name="settings_clock">系统时钟</string>
+    <string name="settings_clock_off">关闭</string>
+    <string name="settings_clock_left">左下方</string>
+    <string name="settings_clock_right">右下方</string>
+    <string name="settings_clock_size">时钟字号</string>
+    <string name="settings_clock_description">使用车机系统时间，并非 iPhone 时钟。返回 CarPlay 时生效。已预留程序坞空间，请停车后确认位置。</string>
+    <string name="settings_clock_unknown">时间未知 —</string>
+    <string name="settings_phone_power_unavailable">iPhone 电量及充电状态：不可用</string>
+</resources>
