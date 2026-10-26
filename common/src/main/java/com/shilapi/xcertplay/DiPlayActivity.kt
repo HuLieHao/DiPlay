@@ -244,7 +244,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var vehicleProbeOutcome: BydVehicleProbeOutcome? = null
     private var adbCheckGeneration = 0
     private var adbStatus: TextView? = null
-    private var availableUpdate: UpdateRelease? = null
     private var updateSavedPath: String? = null
     private var updateSavedUri: Uri? = null
     /** Runs the check of the public update copy; tests run it inline. */
@@ -382,7 +381,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             openProjection(); finish(); return
         }
         scheduleBackgroundUpdateChecks()
-        availableUpdate = UpdateAvailability.available(this, version())
         enforceInterfaceSize()
         refreshAppearance()
         rememberLaunchAppearance()
@@ -545,9 +543,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             startupHotspotCancelled = false
             startCarHotspotOnLaunch()
         }
-        // The background check runs two minutes after opening, usually while CarPlay is in front: what it
-        // found shows when DiPlay comes back, not only after the activity is created again.
-        availableUpdate = UpdateAvailability.available(this, version())
         // Back from the car settings: refresh the car hotspot reminder on the home page.
         if (!initialLaunch && !adbSwitchChangePending && !pausedForAdbSwitchChange &&
             (page == "home" || page == "settings" || page == "connection" || page == "setup")) render()
@@ -1008,30 +1003,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (!compact) right.addView(label(getString(R.string.make_diplay_feel_right_for_your_car), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(24)) })
         else right.addView(space(12))
         right.addView(label(getString(R.string.home_public_preview, version()), 12, MUTED).apply { letterSpacing = .08f })
-        availableUpdate?.let { release ->
-            val message = getString(R.string.update_available_home)
-            val tint = { alpha: Int -> (WARNING and 0x00FFFFFF) or (alpha shl 24) }
-            val chip = GradientDrawable().apply {
-                setColor(tint(0x26))
-                cornerRadius = dp(16).toFloat()
-                setStroke(dp(1), tint(0x80))
-            }
-            right.addView(label(message, 14, WARNING, true).apply {
-                gravity = Gravity.CENTER
-                minHeight = dp(60)
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                isClickable = true
-                isFocusable = true
-                contentDescription = message
-                background = RippleDrawable(
-                    ColorStateList.valueOf(RIPPLE),
-                    chip,
-                    GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = dp(16).toFloat() },
-                )
-                foreground = focusRing(radiusDp = 16)
-                setOnClickListener { openAvailableUpdate(release) }
-            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
-        }
         if (compact && resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
             val compactRight = column().apply {
                 addView(space(8))
@@ -2688,7 +2659,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 outcome.fold(
                     { release ->
                         UpdateAvailability.recordAttempt(this, System.currentTimeMillis())
-                        availableUpdate = release
                         if (release == null) {
                             UpdateAvailability.clear(this)
                             updateMessage = getString(R.string.update_up_to_date)
@@ -2713,15 +2683,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     private fun latestRelease(): UpdateRelease? {
         return UpdateReleaseLookup.latest(version(), userAgent())
-    }
-
-    private fun openAvailableUpdate(release: UpdateRelease) {
-        updateRelease = release
-        updateMessage = null
-        updateStage = UpdateStage.AVAILABLE
-        page = "settings"
-        settingsCategory = SettingsCategory.ABOUT
-        render()
     }
 
     private fun scheduleBackgroundUpdateChecks() {

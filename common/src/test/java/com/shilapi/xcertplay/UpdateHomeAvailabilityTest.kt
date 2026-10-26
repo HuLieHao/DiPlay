@@ -8,16 +8,13 @@ import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.update.UpdateAvailability
 import com.shilapi.xcertplay.update.UpdateRelease
 import org.junit.After
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import org.robolectric.util.ReflectionHelpers
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29], qualifiers = "en-w900dp-h600dp-land")
@@ -26,43 +23,26 @@ class UpdateHomeAvailabilityTest {
 
     @After fun clear() = UpdateAvailability.clearAllForTest(application)
 
-    @Test fun cachedUpdateAppearsBelowTheVersionAndOpensTheExistingDownloadFlow() {
-        val release = release()
-        UpdateAvailability.save(application, release)
+    @Test fun cachedUpdateDoesNotAppearOnWideHome() {
+        assertCachedUpdateHidden()
+    }
+
+    @Config(sdk = [29], qualifiers = "en-w400dp-h900dp-port")
+    @Test fun cachedUpdateDoesNotAppearOnCompactHome() {
+        assertCachedUpdateHidden()
+    }
+
+    private fun assertCachedUpdateHidden() {
+        UpdateAvailability.save(application, release())
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         val activity = controller.get()
-        val text = activity.getString(R.string.update_available_home)
-        val update = descendants(activity.window.decorView).filterIsInstance<TextView>()
-            .single { it.text == text }
-
-        assertTrue(update.isClickable)
-        assertTrue(update.isFocusable)
-        assertEquals(DiPlayPalette.DARK.warning, update.currentTextColor)
-        update.performClick()
-
-        assertEquals(SettingsCategory.ABOUT, ReflectionHelpers.getField<SettingsCategory>(activity, "settingsCategory"))
-        assertTrue(descendants(activity.window.decorView).filterIsInstance<TextView>().any {
-            it.text == activity.getString(R.string.update_download)
+        assertFalse(descendants(activity.window.decorView).filterIsInstance<TextView>().any {
+            it.text == activity.getString(R.string.update_available_home)
         })
         controller.pause().stop().destroy()
     }
 
-    @Config(sdk = [29], qualifiers = "en-w400dp-h900dp-port")
-    @Test fun cachedUpdateKeepsAnArmLengthTargetInCompactHome() {
-        val release = release()
-        UpdateAvailability.save(application, release)
-        val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
-        val activity = controller.get()
-        val update = descendants(activity.window.decorView).filterIsInstance<TextView>().single {
-            it.text == activity.getString(R.string.update_available_home)
-        }
-
-        assertTrue(update.minHeight >= (48 * activity.resources.displayMetrics.density).toInt())
-        assertTrue(update.isClickable)
-        controller.pause().stop().destroy()
-    }
-
-    @Test fun anUpdateFoundWhileDiPlayWasInTheBackgroundShowsWhenHomeReturns() {
+    @Test fun anUpdateFoundInBackgroundDoesNotAppearWhenHomeReturns() {
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         val activity = controller.get()
         val text = activity.getString(R.string.update_available_home)
@@ -74,7 +54,7 @@ class UpdateHomeAvailabilityTest {
         UpdateAvailability.save(application, release())
         controller.start().resume()
 
-        assertTrue(shown())
+        assertFalse(shown())
         controller.pause().stop().destroy()
     }
 

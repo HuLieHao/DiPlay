@@ -28,7 +28,7 @@ git status --short
 git push origin kaiyue
 ```
 
-当前下一版为 **0.2.21-buick.2-debug / code49**；通过验收后发布 **0.2.21-buick.2**，届时versionCode继续增加。code48曾使用的rc命名仅保留在历史包和日志里，新交付不再使用rc或finalN。
+当前下一版为 **0.2.21-buick.2-debug / code50**；通过验收后发布 **0.2.21-buick.2**，届时versionCode继续增加。code48曾使用的rc命名仅保留在历史包和日志里，新交付不再使用rc或finalN。
 
 版本格式为 `<上游基线>-buick.<定制迭代号>`，调试构建自动追加`-debug`：
 
