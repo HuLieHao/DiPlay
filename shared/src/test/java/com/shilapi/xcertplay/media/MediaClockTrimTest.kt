@@ -12,6 +12,63 @@ class MediaClockTrimTest {
     @Before fun forgetLearnedTrim() { MediaClockTrim.learnedTrim = 0.0 }
     @After fun cleanUp() { MediaClockTrim.learnedTrim = 0.0 }
 
+    @Test fun snapshotsDoNotChangeLearningOrRateDecisions() {
+        val observed = MediaClockTrim(48000, 14400, 0.008)
+        val control = MediaClockTrim(48000, 14400, 0.008)
+        for (i in 0..30) {
+            val now = 1_000_000_000L + i * 100_000_000L
+            observed.sample(18000, now, 1024)
+            control.sample(18000, now, 1024)
+            val state = observed.snapshot(now + 10)
+            assertEquals(14400L, state.targetFrames)
+            assertEquals(0.008, state.inheritedIntegral, 0.0)
+            assertEquals(18000L, state.pcmFrames)
+            assertEquals(10L, state.sampleAgeNs)
+            assertEquals(control.rateDue(now), observed.rateDue(now))
+            assertEquals(control.snapshot(now), observed.snapshot(now))
+        }
+    }
+
+    @Test fun firstPauseAndRecoverySnapshotsRetainTheLastActualSample() {
+        val trim = MediaClockTrim(48000, 14400, 0.008)
+        assertEquals(-1L, trim.snapshot(1L).sampleAgeNs)
+        trim.sample(18000, 1_000_000_000L, 15000)
+        val first = trim.snapshot(1_000_000_000L)
+        assertEquals(0L, first.sampleDtNs)
+        assertTrue(first.compressedBacklog)
+        val beforePause = trim.snapshot(1_100_000_000L)
+        val afterRecovery = trim.snapshot(1_600_000_000L)
+        assertEquals(100_000_000L, beforePause.sampleAgeNs)
+        assertEquals(600_000_000L, afterRecovery.sampleAgeNs)
+        assertEquals(first.filteredError, afterRecovery.filteredError)
+        assertEquals(first.integral, afterRecovery.integral, 0.0)
+        trim.sample(16000, 1_700_000_000L, 0)
+        val resumed = trim.snapshot(1_700_000_000L)
+        assertEquals(700_000_000L, resumed.sampleDtNs)
+        assertEquals(0L, resumed.sampleAgeNs)
+        assertEquals(false, resumed.compressedBacklog)
+    }
+
+    @Test fun windowResetPreservesHeadContinuityAndLatestTrimState() {
+        val window = MediaClockWindow()
+        window.sample(100, 20, 0xfffffff0.toInt(), 1_000L)
+        window.sample(80, 40, 0x10, 2_000L)
+        window.sample(60, 30, 0x10, 5_000L)
+        assertEquals(3L, window.samples)
+        assertEquals(32L, window.maxHeadAdvance)
+        assertEquals(1000L, window.maxHeadAdvanceNs)
+        assertEquals(3000L, window.maxSampleGapNs)
+        assertEquals(1L, window.zeroHeadReads)
+        assertEquals(1L, window.advancingHeadReads)
+        window.reset()
+        assertEquals(0L, window.samples)
+        window.sample(50, 0, 0x20, 9_000L)
+        assertEquals(4000L, window.maxSampleGapNs)
+        assertEquals(16L, window.maxHeadAdvance)
+        assertEquals(50L, window.minPcm)
+        assertEquals(0L, window.maxCompressed)
+    }
+
     /**
      * A head unit whose audio clock runs [drift] fast: the iPhone sends 352-frame packets at 48 kHz, with
      * gaps of 50–150 ms followed by a catch-up burst; the head unit plays 1024-frame periods.

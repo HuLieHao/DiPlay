@@ -72,6 +72,21 @@ class AudioClockTrimTest {
         assertTrue(reports.toString(), reports.any { it.startsWith("audio stats") && it.contains(" playbackRate=47280 ended=true") })
     }
 
+    @Test fun clockReportsAreBoundedAndWindowFlushKeepsLatestState() {
+        write(28_800)
+        repeat(20) { write(2_048) }
+        assertEquals(1, reports.count { it.startsWith("Audio: clock state") })
+        assertTrue(reports.single { it.startsWith("Audio: clock state") }.contains("event=first-sample"))
+        val flush = type.getDeclaredMethod("logStatsIfDue", Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        flush.invoke(renderer, true)
+        assertTrue(reports.any { it.startsWith("Audio: clock window") && it.contains("samples=21 ") })
+        assertTrue(reports.any { it.startsWith("Audio: clock state") && it.contains("event=terminal") })
+        flush.invoke(renderer, true)
+        assertTrue(reports.last { it.startsWith("Audio: clock window") }.contains("samples=0 "))
+        assertTrue(reports.filter { it.startsWith("Audio: clock") }.all { it.length <= 700 })
+    }
+
     @Test fun aTrackThatRefusesTheRateKeepsPlayingWithoutTheTrim() {
         RateTrack.result = AudioTrack.ERROR_INVALID_OPERATION
         write(28_800)

@@ -1822,6 +1822,10 @@ private class AudioRenderer(
     private val bufferProgress = AudioBufferProgress(if (format.channels >= 2) 4 else 2)
     private var underrunsAtPlaybackStart = 0
     private var clockTrim: MediaClockTrim? = null
+    private val clockWindow = MediaClockWindow()
+    private var firstClockSampleReported = false
+    private var rebufferPausedNs = 0L
+
     /** Called when this call's track is routed to the earpiece; the sink moves the call to the loudspeaker. */
     @Volatile var onRoutedToEarpiece: (() -> Unit)? = null
     private var routingListener: AudioRouting.OnRoutingChangedListener? = null
@@ -2469,6 +2473,7 @@ private class AudioRenderer(
         reportNavigationPlayback(track)
         if (rebufferCount > 0 && rebufferRecoverReportCount < MAX_REBUFFER_REPORTS) {
             rebufferRecoverReportCount++
+            reportClockState("after-recovery", System.nanoTime(), prebufferBytes.toLong() / frameBytes)
             report("Audio: rebuffer recovered audioType=${format.audioType} rebufferCount=$rebufferCount")
         }
     }
@@ -2496,9 +2501,16 @@ private class AudioRenderer(
             ?: 0L
         val compressedPcmFrames = compressedRtpFrames * format.sampleRate /
             format.rtpClockRate.coerceAtLeast(1)
-        trim.sample(bufferProgress.queuedBytes(track.playbackHeadPosition) / frameBytes,
-            now, compressedPcmFrames)
-        val rate = trim.rateDue(now) ?: return
+        val head = track.playbackHeadPosition
+        val queuedPcm = bufferProgress.queuedBytes(head) / frameBytes
+        trim.sample(queuedPcm, now, compressedPcmFrames)
+        clockWindow.sample(queuedPcm, compressedPcmFrames, head, now)
+        val rate = trim.rateDue(now)
+        if (!firstClockSampleReported) {
+            firstClockSampleReported = true
+            reportClockState("first-sample", now)
+        }
+        if (rate == null) return
         val result = runCatching { track.setPlaybackRate(rate) }.getOrDefault(AudioTrack.ERROR)
         if (result != AudioTrack.SUCCESS) {
             // The track keeps its rate; music then plays as it did before the trim.
@@ -2509,11 +2521,18 @@ private class AudioRenderer(
 
     private fun maintainPlaybackBuffer() {
         val track = track ?: return
+        val head = track.playbackHeadPosition
         if (bufferProgress.shouldRebuffer(mappedChannel == AudioChannel.MEDIA, playbackStarted,
-                track.underrunCount > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition,
+                track.underrunCount > underrunsAtPlaybackStart, queue.isEmpty(), head,
                 startThresholdBytes / 2L)) {
             // The hardware buffer has starved below the recovery floor. Pause without flushing
             // or discarding PCM, then use the configured start threshold again when music resumes.
+            val pauseNs = System.nanoTime()
+            if (rebufferPauseReportCount < MAX_REBUFFER_REPORTS) {
+                reportClockState("before-pause", pauseNs,
+                    bufferProgress.queuedBytes(head) / frameBytes)
+            }
+            rebufferPausedNs = pauseNs
             track.pause()
             playbackStarted = false
             // Pausing retains queued PCM. Count it toward the restart threshold so a
@@ -2533,6 +2552,30 @@ private class AudioRenderer(
             System.nanoTime() - lastPcmWriteNs >= BUFFER_TAIL_WAIT_NS) {
             startPlayback(track)
         }
+    }
+
+    private fun reportClockState(event: String, nowNs: Long, retainedPcm: Long = -1L) {
+        val state = clockTrim?.snapshot(nowNs) ?: return
+        // Separate instantaneous state from window aggregates; event snapshots never reset windows.
+        runCatching { report("Audio: clock state audioType=${format.audioType} event=$event " +
+            "targetFrames=${state.targetFrames} filteredError=${state.filteredError} " +
+            "integral=${state.integral} inheritedIntegral=${state.inheritedIntegral} " +
+            "requestedRate=${state.requestedRate} sampledPcm=${state.pcmFrames} " +
+            "sampledCompressed=${state.compressedFrames} sampleAgeNs=${state.sampleAgeNs} " +
+            "sampleDtNs=${state.sampleDtNs} backlogGuard=${state.compressedBacklog} " +
+            "retainedPcm=$retainedPcm pausedNs=${if (event == "after-recovery") nowNs - rebufferPausedNs else 0L}") }
+    }
+
+    private fun reportClockWindow(nowNs: Long, ended: Boolean) {
+        if (clockTrim == null) return
+        reportClockState(if (ended) "terminal" else "stats", nowNs)
+        runCatching { report("Audio: clock window audioType=${format.audioType} samples=${clockWindow.samples} " +
+            "minPcm=${clockWindow.minPcm} maxPcm=${clockWindow.maxPcm} " +
+            "minCompressed=${clockWindow.minCompressed} maxCompressed=${clockWindow.maxCompressed} " +
+            "maxSampleGapNs=${clockWindow.maxSampleGapNs} zeroHeadReads=${clockWindow.zeroHeadReads} " +
+            "advancingHeadReads=${clockWindow.advancingHeadReads} maxHeadAdvance=${clockWindow.maxHeadAdvance} " +
+            "maxHeadAdvanceNs=${clockWindow.maxHeadAdvanceNs} maxWriteMs=$maxWriteMs ended=$ended") }
+        clockWindow.reset()
     }
 
     // Persist counters even during packet starvation, and flush before disconnect releases the track.
@@ -2583,6 +2626,7 @@ private class AudioRenderer(
             Log.i(STATS_TAG, decoderLine)
             runCatching { report(decoderLine) }
         }
+        reportClockWindow(now, force)
         statsLastUnderruns = underruns
         maxWriteMs = 0L
         writtenFramesThisWindow = 0L

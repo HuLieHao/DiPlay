@@ -19,6 +19,21 @@ internal class MediaClockTrim(
     private val targetFrames: Long,
     private var integral: Double = learnedTrim,
 ) {
+    private val inheritedIntegral = integral
+    private var sampledPcm = 0L
+    private var sampledCompressed = 0L
+    private var sampleDtNs = 0L
+
+    data class Snapshot(val targetFrames: Long, val filteredError: Double?, val integral: Double,
+        val inheritedIntegral: Double, val requestedRate: Int, val pcmFrames: Long,
+        val compressedFrames: Long, val sampleAgeNs: Long, val sampleDtNs: Long,
+        val compressedBacklog: Boolean)
+
+    /** Worker-only observation; does not advance the controller or learned trim. */
+    fun snapshot(nowNs: Long) = Snapshot(targetFrames, level, integral, inheritedIntegral, rate,
+        sampledPcm, sampledCompressed, if (level == null) -1L else nowNs - lastSampleNs,
+        sampleDtNs, compressedBacklog)
+
     private var level: Double? = null
     private var lastSampleNs = 0L
     private var lastBuffered = 0L
@@ -37,6 +52,9 @@ internal class MediaClockTrim(
         compressedBacklog = compressedFrames > targetFrames
         val buffered = queuedFrames.coerceAtLeast(0L) +
             compressedFrames.coerceIn(0L, sampleRate.toLong() * 16L)
+        sampledPcm = queuedFrames
+        sampledCompressed = compressedFrames
+        sampleDtNs = if (level == null) 0L else nowNs - lastSampleNs
         val previous = level
         val elapsedNs = nowNs - lastSampleNs
         // After a pause, a rebuffer or the first write the average restarts from what is queued now.

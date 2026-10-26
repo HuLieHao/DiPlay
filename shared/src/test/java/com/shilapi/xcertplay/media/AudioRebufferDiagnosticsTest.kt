@@ -58,6 +58,7 @@ class AudioRebufferDiagnosticsTest {
             set("startThresholdBytes", threshold)
             set("lastPcmWriteNs", System.nanoTime())
             set("bytesPerSecond", 48_000 * 4)
+            set("clockTrim", MediaClockTrim(48_000, threshold.toLong() / 4))
 
             (get("bufferProgress") as AudioBufferProgress).written(TestTrack.queued)
 
@@ -65,6 +66,7 @@ class AudioRebufferDiagnosticsTest {
             type.getDeclaredMethod("maintainPlaybackBuffer").apply { isAccessible = true }.invoke(renderer)
 
             assertTrue(reports.any { it.contains("Audio: rebuffer paused audioType=media rebufferCount=1") })
+            assertTrue(reports.any { it.startsWith("Audio: clock state") && it.contains("event=before-pause") })
 
             // Write PCM to recover playback
             type.getDeclaredMethod("writePcm", ByteArray::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
@@ -72,6 +74,7 @@ class AudioRebufferDiagnosticsTest {
                 .invoke(renderer, ByteArray(threshold), 0, threshold)
 
             assertTrue(reports.any { it.contains("Audio: rebuffer recovered audioType=media rebufferCount=1") })
+            assertTrue(reports.any { it.startsWith("Audio: clock state") && it.contains("event=after-recovery") && it.contains("pausedNs=") })
 
             // Check queue full flag reset when queue is empty
             set("droppedPacketsLogged", true)
@@ -129,6 +132,7 @@ class AudioRebufferDiagnosticsTest {
             set("mappedChannel", AudioChannel.MEDIA)
             set("startThresholdBytes", threshold)
             set("bytesPerSecond", 48_000 * 4)
+            set("clockTrim", MediaClockTrim(48_000, threshold.toLong() / 4))
 
             val bufferProgress = get("bufferProgress") as AudioBufferProgress
 
@@ -154,6 +158,8 @@ class AudioRebufferDiagnosticsTest {
 
             assertEquals(5, pauseReports.size)
             assertEquals(5, recoverReports.size)
+            assertEquals(5, reports.count { it.startsWith("Audio: clock state") && it.contains("event=before-pause") })
+            assertEquals(5, reports.count { it.startsWith("Audio: clock state") && it.contains("event=after-recovery") })
             assertEquals(10, get("rebufferCount") as Int)
 
             // Test queue full cap over 10 overflow/drain cycles
