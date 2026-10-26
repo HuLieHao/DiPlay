@@ -34,7 +34,9 @@ internal class DiagnosticArchive(
     private var detailBytes = 0L
     private var summaryBytes = 0L
     private val invalidClockRecorded = mutableSetOf<String>()
-    private val pendingStarts = linkedMapOf<String, ByteArray>()
+    private class PendingStart(val metadata: ByteArray, var headerAdmitted: Boolean = false)
+    private val pendingStarts = linkedMapOf<String, PendingStart>()
+    private val writesInProgress = mutableSetOf<String>()
     private var pendingStartsDropped = 0L
     private var metadataEntriesDropped = 0L
     private var reportedStartDrops = 0L
@@ -53,7 +55,7 @@ internal class DiagnosticArchive(
         if (makeCurrent) current = id
         parts[id] = 0
         val metadata = "session=$id process=$processId wallMs=$startedWall timezone=${TimeZone.getDefault().id} monotonicMs=$startedMono clockValid=${clockValid && validWall(startedWall)} reason=${reason.take(1024)}\n"
-        pendingStarts[id] = metadata.toByteArray()
+        pendingStarts[id] = PendingStart(metadata.toByteArray())
         if (pendingStarts.size > 64) {
             pendingStarts.remove(pendingStarts.keys.first())
             pendingStartsDropped++
@@ -66,63 +68,67 @@ internal class DiagnosticArchive(
 
     fun append(session: String, original: String) = synchronized(lock) {
         require(session.matches(sessionPattern))
-        if (!ensureMetadata(session)) {
-            metadataEntriesDropped++
-            event("detail_dropped session_metadata_unavailable session=$session")
-            return@synchronized
-        }
-        reportPendingLoss()
-        Regex("attempt(?:Id)?=([^ \n]+)").find(original)?.groupValues?.get(1)?.let { attempt ->
-            activeRun.updateAndGet { if (it.session == session) it.copy(attempt = attempt) else it }
-        }
-        val now = wall(); val mono = monotonic()
-        val delta = now - lastWall - (mono - lastMono)
-        if (!validWall(now) || kotlin.math.abs(delta) > 300_000 || now < lastWall) {
-            clockValid = false
-            if (invalidClockRecorded.add(session)) {
-                val meta = File(directory, "$session.meta")
-                if (meta.length() < MAX_METADATA_BYTES)
-                    writeAdmitted(meta, "clockValid=false clock_jump=true\n".toByteArray(), append = true)
-                summary(session, "clock_jump wallMs=$now previousWallMs=$lastWall monotonicMs=$mono dateSelectionUnreliable=true")
-            }
-        }
-        lastWall = now; lastMono = mono
-        val text = original.take(MAX_LINE_CHARS) + if (original.length > MAX_LINE_CHARS) " [truncated oversized line]\n" else "\n"
-        val bytes = text.toByteArray(Charsets.UTF_8)
-        // Summary admission is independent: detail pins/budget must never suppress critical events.
-        if (isSummary(original)) summary(session, "wallMs=$now monotonicMs=$mono $text")
-        if (!hasSpace(bytes.size.toLong())) cleanup(spaceNeeded = bytes.size.toLong())
-        if (!hasSpace(bytes.size.toLong())) {
-            event("detail_dropped low_space session=$session")
-            return@synchronized
-        }
-        if (detailBytes + bytes.size > detailBudget) {
-            cleanup(detailLimit = (detailBudget - bytes.size).coerceAtLeast(0))
-            if (detailBytes + bytes.size > detailBudget) {
-                event("detail_dropped archive_budget_pinned_or_entry_too_large=true session=$session")
+        writesInProgress.add(session)
+        try {
+            if (!ensureMetadata(session)) {
+                metadataEntriesDropped++
+                event("detail_dropped session_metadata_unavailable session=$session")
                 return@synchronized
             }
-        }
-        var file = detail(session)
-        val rotated = file.length() + bytes.size > partBytes && file.length() > 0
-        if (rotated) { parts[session] = (parts[session] ?: 0) + 1; file = detail(session) }
-        try {
-            if (!writeAdmitted(file, bytes, append = true)) { event("detail_dropped low_space session=$session"); return@synchronized }
-            detailBytes += bytes.size
-            if (isException(original) && (lastException == Long.MIN_VALUE || mono - lastException >= 60_000)) {
-                val header = "session=$session process=$processId wallMs=$now monotonicMs=$mono exceptionContext=last64KiB\n".toByteArray()
-                val contextBytes = minOf(file.length(), 64L * 1024)
-                if (hasSpace(header.size + contextBytes)) {
-                    lastException = mono
-                    val context = File(directory, "$session-${UUID.randomUUID()}.exception")
-                    context.outputStream().use { output ->
-                        output.write(header)
-                        file.inputStream().use { input -> input.skip(file.length() - contextBytes); input.copyTo(output, 8192) }
-                    }
-                } else event("exception_dropped low_space session=$session")
+            reportPendingLoss()
+            Regex("attempt(?:Id)?=([^ \n]+)").find(original)?.groupValues?.get(1)?.let { attempt ->
+                activeRun.updateAndGet { if (it.session == session) it.copy(attempt = attempt) else it }
             }
-            if (rotated || lastCleanup == Long.MIN_VALUE || mono - lastCleanup > 60_000) { cleanup(); lastCleanup = mono }
-        } catch (failure: IOException) { event("write_failed session=$session type=${failure.javaClass.simpleName} partial_tail_possible=true") }
+            val now = wall(); val mono = monotonic()
+            val delta = now - lastWall - (mono - lastMono)
+            if (!validWall(now) || kotlin.math.abs(delta) > 300_000 || now < lastWall) {
+                clockValid = false
+                if (invalidClockRecorded.add(session)) {
+                    val meta = File(directory, "$session.meta")
+                    if (meta.length() < MAX_METADATA_BYTES)
+                        writeAdmitted(meta, "clockValid=false clock_jump=true\n".toByteArray(), append = true)
+                    summary(session, "clock_jump wallMs=$now previousWallMs=$lastWall monotonicMs=$mono dateSelectionUnreliable=true")
+                }
+            }
+            lastWall = now; lastMono = mono
+            val text = original.take(MAX_LINE_CHARS) + if (original.length > MAX_LINE_CHARS) " [truncated oversized line]\n" else "\n"
+            val bytes = text.toByteArray(Charsets.UTF_8)
+            // Summary admission is independent: detail pins/budget must never suppress critical events.
+            if (isSummary(original)) summary(session, "wallMs=$now monotonicMs=$mono $text")
+            if (!hasSpace(bytes.size.toLong())) cleanup(spaceNeeded = bytes.size.toLong())
+            if (!hasSpace(bytes.size.toLong())) {
+                event("detail_dropped low_space session=$session")
+                return@synchronized
+            }
+            if (detailBytes + bytes.size > detailBudget) {
+                cleanup(detailLimit = (detailBudget - bytes.size).coerceAtLeast(0))
+                if (detailBytes + bytes.size > detailBudget) {
+                    event("detail_dropped archive_budget_pinned_or_entry_too_large=true session=$session")
+                    return@synchronized
+                }
+            }
+            var file = detail(session)
+            val rotated = file.length() + bytes.size > partBytes && file.length() > 0
+            if (rotated) { parts[session] = (parts[session] ?: 0) + 1; file = detail(session) }
+            try {
+                if (!writeAdmitted(file, bytes, append = true)) { event("detail_dropped low_space session=$session"); return@synchronized }
+                detailBytes += bytes.size
+                pendingStarts.remove(session) // metadata now owns durable evidence even if its initial summary could not fit
+                if (isException(original) && (lastException == Long.MIN_VALUE || mono - lastException >= 60_000)) {
+                    val header = "session=$session process=$processId wallMs=$now monotonicMs=$mono exceptionContext=last64KiB\n".toByteArray()
+                    val contextBytes = minOf(file.length(), 64L * 1024)
+                    if (hasSpace(header.size + contextBytes)) {
+                        lastException = mono
+                        val context = File(directory, "$session-${UUID.randomUUID()}.exception")
+                        context.outputStream().use { output ->
+                            output.write(header)
+                            file.inputStream().use { input -> input.skip(file.length() - contextBytes); input.copyTo(output, 8192) }
+                        }
+                    } else event("exception_dropped low_space session=$session")
+                }
+                if (rotated || lastCleanup == Long.MIN_VALUE || mono - lastCleanup > 60_000) { cleanup(); lastCleanup = mono }
+            } catch (failure: IOException) { event("write_failed session=$session type=${failure.javaClass.simpleName} partial_tail_possible=true") }
+        } finally { writesInProgress.remove(session) }
     }
 
     fun appendLegacyMirror(file: File, text: String) = synchronized(lock) {
@@ -262,12 +268,20 @@ internal class DiagnosticArchive(
 
     private fun ensureMetadata(session: String): Boolean {
         val file = File(directory, "$session.meta")
-        val metadata = pendingStarts[session]
-        if (metadata != null) {
-            if (!writeAdmitted(file, metadata)) return false
-            summary(session, String(metadata, Charsets.UTF_8) +
+        val pending = pendingStarts[session]
+        if (pending != null) {
+            // A pending summary must not turn a completed header into a mutable snapshot:
+            // it may already contain an invalid-clock marker. Failed/partial first writes retry.
+            if (!pending.headerAdmitted || !file.isFile) {
+                val metadata = if (session in invalidClockRecorded)
+                    pending.metadata + "clockValid=false clock_marker_recovered=true\n".toByteArray()
+                else pending.metadata
+                if (!writeAdmitted(file, metadata)) return false
+                pending.headerAdmitted = true
+            }
+            val summarySaved = summary(session, String(pending.metadata, Charsets.UTF_8) +
                 "Tail durability: asynchronous queue; sudden process/power loss may lose queued or filesystem-buffered tail. Metadata may be recovered after low space; missing entries are counted in maintenance.")
-            pendingStarts.remove(session)
+            if (summarySaved) pendingStarts.remove(session)
             reportPendingLoss()
         }
         return file.isFile
@@ -288,22 +302,23 @@ internal class DiagnosticArchive(
     }
 
     private fun detail(session: String) = File(directory, "$session-$processId-${(parts[session] ?: 0).toString().padStart(6, '0')}.log")
-    private fun summary(session: String, text: String) {
+    private fun summary(session: String, text: String): Boolean {
         var file = File(directory, "$session.summary")
         var index = 1
         while (file.length() >= 256 * 1024) file = File(directory, "$session-summary-${index++}.summary")
         val value = if (text.length <= 8192) "$text\n" else text.take(8192) + " [truncated summary excerpt; original in details]\n"
         val bytes = value.toByteArray(Charsets.UTF_8)
         if (summaryBytes + bytes.size > 4L * 1024 * 1024) cleanup(summaryLimit = 4L * 1024 * 1024 - bytes.size)
-        if (summaryBytes + bytes.size > 4L * 1024 * 1024) { event("summary_dropped pinned_budget session=$session"); return }
-        if (!writeAdmitted(file, bytes, append = true)) { event("summary_dropped low_space session=$session"); return }
+        if (summaryBytes + bytes.size > 4L * 1024 * 1024) { event("summary_dropped pinned_budget session=$session"); return false }
+        if (!writeAdmitted(file, bytes, append = true)) { event("summary_dropped low_space session=$session"); return false }
         summaryBytes += bytes.size
+        return true
     }
     private fun reportPendingLoss() {
         if (pendingStartsDropped == reportedStartDrops && metadataEntriesDropped == reportedEntryDrops) return
         if (event("metadata_loss_recovery pendingStartsDroppedTotal=$pendingStartsDropped " +
                 "metadataUnavailableEntriesDroppedTotal=$metadataEntriesDropped " +
-                "pendingStartCapacity=64 oldest_start_metadata_lost=true countsProcess=$processId")) {
+                "pendingStartCapacity=64 oldest_pending_admission_evicted=true metadata_may_be_missing=true countsProcess=$processId")) {
             reportedStartDrops = pendingStartsDropped
             reportedEntryDrops = metadataEntriesDropped
         }
@@ -342,7 +357,7 @@ internal class DiagnosticArchive(
         prune("exception", 8L * 66 * 1024, 14, 8)
         prune("network", 3L * 3 * 640 * 1024, 7, 3)
         // Metadata lives exactly as long as its evidence; interrupted starts do not accumulate forever.
-        all.filter { it.extension == "meta" && it.nameWithoutExtension != current && it.nameWithoutExtension !in pendingStarts }.forEach { meta ->
+        all.filter { it.extension == "meta" && it.nameWithoutExtension != current && it.nameWithoutExtension !in pendingStarts && it.nameWithoutExtension !in writesInProgress }.forEach { meta ->
             if (directory.listFiles().orEmpty().none { it != meta && it.name.startsWith(meta.nameWithoutExtension) }) meta.delete()
         }
         parts.keys.removeAll { it != current && it !in pendingStarts && !File(directory, "$it.meta").isFile }

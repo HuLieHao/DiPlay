@@ -338,10 +338,12 @@ class WheelKeyService : AccessibilityService() {
             val maximum = audio.getStreamMaxVolume(stream)
             val target = navigationWheelTarget(current, minimum, maximum, delta) ?: return false
             if (navigationStream() != stream) return false
-            audio.setStreamVolume(stream, target, 0)
+            val customFeedback = CarPlayVolumeSettings.enabled(this) &&
+                CarPlayVolumeDisplay.show != null && CarPlayVolumeDisplay.canShow?.invoke() == true
+            audio.setStreamVolume(stream, target, if (customFeedback) 0 else AudioManager.FLAG_SHOW_UI)
             // Failed/unsupported writes leave the initial press with the head unit.
             (audio.getStreamVolume(stream) == target).also {
-                if (it) CarPlayVolumeDisplay.show?.invoke(stream, target, maximum)
+                if (it && customFeedback) CarPlayVolumeDisplay.show?.invoke(stream, target, maximum)
             }
         } catch (error: Exception) {
             Log.w(TAG, "navigation volume unavailable for stream $stream", error)

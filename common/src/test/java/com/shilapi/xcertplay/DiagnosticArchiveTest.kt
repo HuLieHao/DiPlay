@@ -6,6 +6,106 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DiagnosticArchiveTest {
+    @Test fun pendingHeaderRetriesAnIncompleteInitialWrite() {
+        val root = Files.createTempDirectory("partial-header-retry").toFile()
+        try {
+            val archive = DiagnosticArchive(root, reserve = 0)
+            val id = java.util.UUID.randomUUID().toString()
+            val metadata = root.resolve("archive/$id.meta").apply { mkdirs() }
+            assertThrows(java.io.IOException::class.java) { archive.start("retryable header", id = id) }
+            metadata.delete()
+            metadata.writeText("session=interrupted")
+            archive.append(id, "original after retry")
+            assertTrue(metadata.readText().contains("session=$id "))
+            assertFalse(metadata.readText().contains("session=interrupted"))
+            archive.export(root.resolve("complete.zip"), id, "metadata")
+            ZipFile(root.resolve("complete.zip")).use { zip ->
+                assertNotNull(zip.getEntry("logs/$id.meta"))
+                assertTrue(zip.entries().asSequence().filter { it.name.endsWith(".log") }
+                    .any { zip.getInputStream(it).bufferedReader().readText().contains("original after retry") })
+            }
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun pendingSummaryRecoveryPreservesInvalidClockMetadataAcrossReopen() {
+        val root = Files.createTempDirectory("pending-clock-recovery").toFile()
+        try {
+            var now = 1_800_018_000_000L
+            var mono = 1000L
+            var space = 10_000_000L
+            val archive = DiagnosticArchive(root, wall = { now }, monotonic = { mono }, reserve = 1000, usableSpace = { space })
+            archive.start("active")
+            space = 1250L
+            val queued = archive.start("queued", makeCurrent = false)
+            val metadata = root.resolve("archive/$queued.meta")
+            assertTrue(metadata.exists())
+            now -= 10_000L; mono++
+            archive.append(queued, "x".repeat(500)) // marker fits; initial summary/detail do not
+            assertTrue(metadata.readText().contains("clockValid=false"))
+            assertFalse(root.resolve("archive").listFiles()!!.any { it.name.startsWith(queued) && it.extension == "log" })
+            space = 10_000_000L
+            now += 10_000L; mono++
+            archive.append(queued, "original after recovery")
+            val reopened = DiagnosticArchive(root, wall = { now }, monotonic = { mono }, reserve = 0)
+            reopened.export(root.resolve("today.zip"), "today", "metadata")
+            ZipFile(root.resolve("today.zip")).use { zip ->
+                assertNull("a persisted invalid-clock marker must survive pending admission retry", zip.getEntry("logs/$queued.meta"))
+            }
+            reopened.export(root.resolve("selected.zip"), queued, "metadata")
+            ZipFile(root.resolve("selected.zip")).use { zip ->
+                assertTrue(zip.getInputStream(zip.getEntry("logs/$queued.meta")).bufferedReader().readText().contains("clockValid=false"))
+                assertTrue(zip.entries().asSequence().filter { it.name.endsWith(".log") }
+                    .any { zip.getInputStream(it).bufferedReader().readText().contains("original after recovery") })
+            }
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun nonCurrentStartSurvivesWhenMetadataFitsButInitialSummaryDoesNot() {
+        val root = Files.createTempDirectory("header-only-admission").toFile()
+        try {
+            var space = 10_000_000L
+            val archive = DiagnosticArchive(root, reserve = 1000, usableSpace = { space })
+            archive.start("current")
+            // Metadata is under 400 bytes; the initial summary also includes durability text.
+            space = 1250L
+            val queued = archive.start("queued", makeCurrent = false)
+            space = 10_000_000L
+            archive.append(queued, "original recovered queued run")
+            val zip = archive.export(root.resolve("recovered.zip"), queued, "metadata")
+            ZipFile(zip).use { bundle ->
+                assertNotNull(bundle.getEntry("logs/$queued.meta"))
+                assertTrue(bundle.entries().asSequence().filter { it.name.endsWith(".log") }
+                    .any { bundle.getInputStream(it).bufferedReader().readText().contains("original recovered queued run") })
+            }
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun lateSummaryRemainsSelectableWhenItsLastPriorEvidenceIsPruned() {
+        val root = Files.createTempDirectory("late-summary-admission").toFile()
+        try {
+            val archive = DiagnosticArchive(root, reserve = 0, detailBudget = 150)
+            val old = archive.start("old")
+            archive.append(old, "x".repeat(100))
+            val current = archive.start("new")
+            archive.append(current, "y".repeat(100)) // prunes old detail, leaves old summary
+            val folder = root.resolve("archive")
+            val currentSummary = folder.resolve("$current.summary").length()
+            folder.resolve("$old.summary").apply {
+                writeBytes(ByteArray((4 * 1024 * 1024 - currentSummary - 20).toInt()) { 120 })
+                setLastModified(1L)
+            }
+            archive.export(root.resolve("before.zip"), "all", "metadata")
+            assertTrue(folder.resolve("$old.meta").exists())
+            archive.append(old, "CONNECTION_DIAGNOSTIC late original tail")
+            archive.export(root.resolve("after.zip"), old, "metadata")
+            ZipFile(root.resolve("after.zip")).use { bundle ->
+                assertNotNull("late original evidence must retain selectable metadata", bundle.getEntry("logs/$old.meta"))
+                assertTrue(bundle.entries().asSequence().filter { it.name.endsWith(".summary") }
+                    .any { bundle.getInputStream(it).bufferedReader().readText().contains("late original tail") })
+            }
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun summaryBudgetCleanupCannotUnlinkMetadataBeingAdmittedForAnOlderQueuedRun() {
         val root = Files.createTempDirectory("pending-summary-prune").toFile()
         try {

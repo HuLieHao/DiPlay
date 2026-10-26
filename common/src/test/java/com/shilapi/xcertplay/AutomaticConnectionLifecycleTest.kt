@@ -33,6 +33,54 @@ class AutomaticConnectionLifecycleTest {
     private fun enqueue() = ReflectionHelpers.callInstanceMethod<Unit>(activity, "postAutomaticConnection",
         from(Boolean::class.javaPrimitiveType, false))
 
+    private fun explicitConnect() = ReflectionHelpers.callInstanceMethod<Unit>(activity, "connect",
+        from(Boolean::class.javaPrimitiveType, false))
+    private fun holdSessionStop(): () -> Unit {
+        var completion: (() -> Unit)? = null
+        val stop: ((() -> Unit) -> Unit) = { completion = it }
+        ReflectionHelpers.setField(CarPlayBackgroundSession, "stopAction", stop)
+        return { CarPlayBackgroundSession.clear(); completion!!() }
+    }
+    @Test fun manualStopCancelsDeferredExplicitTransportMutationAndLaunch() {
+        val finish = holdSessionStop()
+        AirPlayPersistence.saveWirelessEnabled(activity, true)
+        explicitConnect()
+        Thread { finish() }.apply { start(); join() } // completion is queued onto UI
+        CarPlayBackgroundSession.stop()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(AirPlayPersistence.loadWirelessEnabled(activity))
+        assertNull(shadowOf(activity).nextStartedActivity)
+    }
+    @Test fun supersededExplicitRequestCannotOpenAnotherProjection() {
+        val finish = holdSessionStop()
+        explicitConnect()
+        explicitConnect()
+        Thread { finish() }.apply { start(); join() }
+        shadowOf(Looper.getMainLooper()).idle()
+        assertNotNull(shadowOf(activity).nextStartedActivity)
+        assertNull("only the newest explicit request may launch", shadowOf(activity).nextStartedActivity)
+    }
+    @Test fun destroyedManagementActivityCancelsDeferredConnection() {
+        val finish = holdSessionStop()
+        AirPlayPersistence.saveWirelessEnabled(activity, true)
+        explicitConnect()
+        ReflectionHelpers.callInstanceMethod<Unit>(activity, "onDestroy")
+        Thread { finish() }.apply { start(); join() }
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(AirPlayPersistence.loadWirelessEnabled(activity))
+        assertNull(shadowOf(activity).nextStartedActivity)
+    }
+    @Test fun finishingManagementActivityCancelsDeferredConnection() {
+        val finish = holdSessionStop()
+        AirPlayPersistence.saveWirelessEnabled(activity, true)
+        explicitConnect()
+        activity.finish()
+        Thread { finish() }.apply { start(); join() }
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(AirPlayPersistence.loadWirelessEnabled(activity))
+        assertNull(shadowOf(activity).nextStartedActivity)
+    }
+
     @Test fun duplicateWakeRequestsOpenOnlyOneProjection() {
         enqueue()
         enqueue()

@@ -85,6 +85,34 @@ class WheelKeyServiceTest {
     private fun learn(cancelled: () -> Unit = {}): Boolean =
         WheelKeyService.learn(WheelZoomSettings.Role.MODE, cancelled) { _, _ -> learned++ }
 
+    @Test fun navigationWheelKeepsSystemFeedbackWhenCustomBarIsOffOrHostHidden() {
+        WheelZoomSettings.setEnabled(service, false)
+        service.session = { "phone" }
+        service.navigationPlayback = { com.shilapi.xcertplay.media.NavigationPlaybackSnapshot(true, AudioManager.STREAM_NOTIFICATION) }
+        service.getSharedPreferences("diplay_navigation_wheel", Context.MODE_PRIVATE).edit().putBoolean("enabled", true).commit()
+        val audio = spy(service.getSystemService(AudioManager::class.java))
+        org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowContextImpl>(service.baseContext)
+            .setSystemService(Context.AUDIO_SERVICE, audio)
+        try {
+            val overlay = CarPlayVolumeOverlay(service, android.os.Handler(Looper.getMainLooper()))
+            for ((enabled, visible, flags) in listOf(
+                Triple(false, true, AudioManager.FLAG_SHOW_UI),
+                Triple(true, false, AudioManager.FLAG_SHOW_UI),
+                Triple(true, true, 0))) {
+                CarPlayVolumeSettings.save(service, enabled)
+                overlay.stop()
+                CarPlayVolumeDisplay.canShow = { visible }
+                CarPlayVolumeDisplay.show = { stream, current, maximum -> overlay.show(stream, current, maximum) }
+                audio.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 2, 0)
+                clearInvocations(audio)
+                assertEquals(true to true, press(KeyEvent.KEYCODE_VOLUME_UP))
+                verify(audio).setStreamVolume(AudioManager.STREAM_NOTIFICATION, 3, flags)
+                assertEquals(if (enabled && visible) android.view.View.VISIBLE else android.view.View.GONE, overlay.visibility)
+            }
+            overlay.stop()
+        } finally { CarPlayVolumeDisplay.show = null; CarPlayVolumeDisplay.canShow = null }
+    }
+
     @Test fun disabledSwitchCancelsLearningAndRestoresItsVisiblePrompt() {
         val assign = Button(service).apply { text = "Press a key" }
         assertTrue(learn { assign.text = "Assign" })

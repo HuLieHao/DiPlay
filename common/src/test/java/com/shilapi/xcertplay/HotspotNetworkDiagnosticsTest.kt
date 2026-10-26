@@ -24,6 +24,23 @@ class HotspotNetworkDiagnosticsTest {
         return try { java.util.zip.ZipFile(file).use { zip -> zip.entries().asSequence().joinToString("\n") { zip.getInputStream(it).bufferedReader().use { input -> input.readText() } } } }
         finally { file.delete() }
     }
+    @Test fun failedArchiveSelectionDeletesOwnedZipAndPreservesExistingFiles() {
+        val context = RuntimeEnvironment.getApplication()
+        val directory = File(context.cacheDir, "archive-reports")
+        DiagnosticArchive.newExportFile(directory, 47).delete() // initialize stale-file cleanup
+        val previous = File(directory, "BuickPlay-code47-previous.zip").apply { writeText("retained") }
+        val activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
+        try {
+            val failure = runCatching {
+                activity.javaClass.getDeclaredMethod("diagnosticReportFile", Context::class.java, String::class.java)
+                    .apply { isAccessible = true }.invoke(activity, context, "../invalid")
+            }.exceptionOrNull()
+            assertTrue(failure is java.lang.reflect.InvocationTargetException && failure.cause is IllegalArgumentException)
+            assertEquals(listOf(previous), directory.listFiles()!!.toList())
+            assertEquals("retained", previous.readText())
+        } finally { directory.deleteRecursively() }
+    }
+
     @Test fun savedHotspotSnapshotSurvivesUntilDiagnosticExport() {
         val context = RuntimeEnvironment.getApplication()
         val folder = File(context.filesDir, "hotspot-network-diagnostics").apply { mkdirs() }

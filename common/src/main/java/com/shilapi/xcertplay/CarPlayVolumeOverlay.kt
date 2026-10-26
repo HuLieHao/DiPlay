@@ -111,5 +111,6 @@ internal class CarPlayVolumeKeyRouter(
 
 /** Only a resumed host registers. Accessibility routing still works with no host/overlay. */
 internal object CarPlayVolumeDisplay {
+    var canShow: (() -> Boolean)? = null
     var show: ((Int, Int, Int) -> Unit)? = null
 }

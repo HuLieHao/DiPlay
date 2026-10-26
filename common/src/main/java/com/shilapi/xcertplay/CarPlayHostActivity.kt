@@ -1185,8 +1185,12 @@ class CarPlayHostActivity : ComponentActivity() {
         super.onResume()
         WheelKeyService.restoreIfNeeded(this)
         hostAppearanceResumed = true
+        CarPlayVolumeDisplay.canShow = {
+            hostAppearanceResumed && activeScreenStreamTypes.isNotEmpty() && !menuOpen &&
+                volumeOverlay != null && CarPlayVolumeSettings.enabled(this)
+        }
         CarPlayVolumeDisplay.show = { stream, current, maximum ->
-            if (hostAppearanceResumed && activeScreenStreamTypes.isNotEmpty() && !menuOpen && CarPlayVolumeSettings.enabled(this)) volumeOverlay?.show(stream, current, maximum)
+            if (CarPlayVolumeDisplay.canShow?.invoke() == true) volumeOverlay?.show(stream, current, maximum)
         }
         updateDebugOverlays()
         updateCallPopupGuard()
@@ -1846,6 +1850,7 @@ class CarPlayHostActivity : ComponentActivity() {
         hostAppearanceResumed = false
         clockOverlay?.update(false, darkMode)
         CarPlayVolumeDisplay.show = null
+        CarPlayVolumeDisplay.canShow = null
         volumeOverlay?.stop()
         updateCallPopupGuard()
         AppAppearanceRuntime.clearHost(this)
@@ -1854,6 +1859,8 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        mainHandler.removeCallbacks(applyDisplaySize)
+        pendingDisplaySize = null
         mainHandler.removeCallbacks(refreshWaitingProgress)
         mainHandler.removeCallbacks(sidePanelTick)
         com.shilapi.xcertplay.hud.BydTyreStatus.stop()
@@ -5660,7 +5667,11 @@ class CarPlayHostActivity : ComponentActivity() {
         return File(filesDir, AUDIO_CAPTURE_DIRECTORY)
     }
 
+    private fun deferHiddenSessionResize(): Boolean =
+        !isActivityStarted && (controller != null || sessionDisplay != null)
+
     private fun scheduleDisplaySize(width: Int, height: Int) {
+        if (deferHiddenSessionResize()) return
         if (width <= 0 || height <= 0 || shuttingDown.get()) return
         val size = DisplaySize(width, height)
         if (size == pendingDisplaySize) return
@@ -5686,6 +5697,9 @@ class CarPlayHostActivity : ComponentActivity() {
         ViewCompat.getRootWindowInsets(window.decorView)?.isVisible(WindowInsetsCompat.Type.statusBars())
 
     private fun applyDisplaySize(size: DisplaySize) {
+        // Insets/layout callbacks can arrive after onStop or after their runnable was dequeued.
+        // Re-read the visible view on resume; hidden dimensions must not mutate negotiation state.
+        if (deferHiddenSessionResize()) return
         val display = sessionDisplay
         if (display != null && applyViewArea(size, display)) return
         val layoutChanged = displayLayoutChanged(size)

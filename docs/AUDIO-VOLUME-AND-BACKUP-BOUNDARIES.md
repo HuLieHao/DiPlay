@@ -40,7 +40,9 @@ workspace shows:
 - `com/ts/MainUI/Evc.java:178–194` checks legacy stream **11** as `STREAM_GIS`.
   This is evidence against assuming stream 14 for this firmware.
 
-All handled writes use flags **0**, so DiPlay does not request Android/OEM UI.
+Handled writes use flags **0** only when the enabled app volume bar can display
+replacement feedback. The accessibility navigation path retains **FLAG_SHOW_UI**
+when that replacement is off or unavailable.
 Firmware can consume physical keys before DiPlay or independently notice a volume
 change and display its own bar. Therefore **two bars may still appear**, or DiPlay
 may receive no key at all. There is no verified normal-app suppression API in the

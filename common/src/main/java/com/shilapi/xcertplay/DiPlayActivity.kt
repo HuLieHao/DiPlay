@@ -574,6 +574,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     override fun onDestroy() {
+        connectionRequestGeneration++
         settingsSearchPopup?.dismiss()
         appearanceObserverRemoval?.invoke()
         appearanceObserverRemoval = null
@@ -5740,8 +5741,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         parent.addView(space(12))
     }
 
+    private var connectionRequestGeneration = 0L
+
     private fun connect(wireless: Boolean) {
+        val request = ++connectionRequestGeneration
         CarPlayBackgroundSession.allowAutomaticConnection()
+        val ticket = CarPlayBackgroundSession.automaticConnectionTicket() ?: return
         startupHotspotCancelled = true
         if (wireless && pendingCarHotspotSetup) { toast(getString(R.string.save_your_hotspot_details_in_connection_setup_first)); page = "connection"; render(); return }
         if (setupError != null) { toast(setupError!!); return }
@@ -5765,8 +5770,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             return
         }
         val open = {
-            AirPlayPersistence.saveWirelessEnabled(this, wireless)
-            openProjection()
+            if (request == connectionRequestGeneration && !isFinishing && !isDestroyed &&
+                CarPlayBackgroundSession.acceptsAutomaticConnection(ticket)) {
+                AirPlayPersistence.saveWirelessEnabled(this, wireless)
+                openProjection()
+            }
         }
         if (CarPlayBackgroundSession.hasSession()) CarPlayBackgroundSession.stop(manual = false) { runOnUiThread { open() } }
         else open()
@@ -6040,12 +6048,17 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         val code = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info)
         val directory = File(appContext.cacheDir, "archive-reports")
         val file = DiagnosticArchive.newExportFile(directory, code)
-        val flushed = AsyncDiagnosticLog.awaitIdle(2_000)
-        val metadata = buildString {
-            appendLine("Archive queue flush=$flushed; false means pending tail may be absent. ${AsyncDiagnosticLog.status()}")
-            writeDiagnosticReport(appContext, this, includeOriginalLogs = false)
+        try {
+            val flushed = AsyncDiagnosticLog.awaitIdle(2_000)
+            val metadata = buildString {
+                appendLine("Archive queue flush=$flushed; false means pending tail may be absent. ${AsyncDiagnosticLog.status()}")
+                writeDiagnosticReport(appContext, this, includeOriginalLogs = false)
+            }
+            return DiagnosticArchive.forLogs(File(appContext.filesDir, "logs")).export(file, selection, metadata)
+        } catch (error: Throwable) {
+            file.delete()
+            throw error
         }
-        return DiagnosticArchive.forLogs(File(appContext.filesDir, "logs")).export(file, selection, metadata)
     }
 
     /** Both export paths share the same content; the phone path never builds the whole report in memory. */

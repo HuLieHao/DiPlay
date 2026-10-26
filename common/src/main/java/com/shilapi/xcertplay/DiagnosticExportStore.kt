@@ -26,9 +26,9 @@ internal object DiagnosticExportStore {
         val savedPath: String? = null,
     )
 
-    private class Source(val open: () -> java.io.InputStream, val length: Long, val available: (() -> Long)? = null)
+    private class Source(val open: () -> java.io.InputStream, val length: Long)
     private fun source(report: String) = Source({ report.byteInputStream(Charsets.UTF_8) }, report.toByteArray(Charsets.UTF_8).size.toLong())
-    private fun source(report: File) = Source({ report.inputStream() }, report.length(), { report.usableSpace })
+    private fun source(report: File) = Source({ report.inputStream() }, report.length())
 
     internal fun copyWithReserve(input: java.io.InputStream, output: java.io.OutputStream, length: Long,
         available: () -> Long, reserve: Long = 32L * 1024 * 1024) {
@@ -41,8 +41,7 @@ internal object DiagnosticExportStore {
             output.write(buffer, 0, count)
         }
     }
-    private fun copy(report: Source, output: java.io.OutputStream) = report.open().use { input ->
-        val available = report.available
+    private fun copy(report: Source, output: java.io.OutputStream, available: (() -> Long)? = null) = report.open().use { input ->
         if (available == null) input.copyTo(output, 32 * 1024)
         else copyWithReserve(input, output, report.length, available)
     }
@@ -106,7 +105,7 @@ internal object DiagnosticExportStore {
         val suffix = if (fileName.endsWith(".zip")) ".zip" else ".txt"
         val file = File.createTempFile(fileName.removeSuffix(suffix) + "-", suffix, directory)
         try {
-            file.outputStream().use { output -> copy(report, output) }
+            file.outputStream().use { output -> copy(report, output) { directory.usableSpace } }
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.diagnostic-reports", file)
             // Retain only the newest eight reports; never prune the export being returned.
             directory.listFiles()?.filter { it != file && it.isFile }
@@ -143,7 +142,7 @@ internal object DiagnosticExportStore {
         var copy = 1
         while (file.exists()) file = File(directory, "$base-${copy++}$suffix")
         try {
-            file.outputStream().use { output -> copy(report, output) }
+            file.outputStream().use { output -> copy(report, output) { directory.usableSpace } }
             if (file.length() == 0L && report.length > 0) throw IOException("Downloads/DiPlay did not keep the report")
         } catch (error: Exception) {
             file.delete()
@@ -183,7 +182,7 @@ internal object DiagnosticExportStore {
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             ?: throw IOException("Downloads could not create the report")
         try {
-            write(resolver, uri, report)
+            write(resolver, uri, report) { Environment.getExternalStorageDirectory().usableSpace }
             val published = resolver.update(uri, ContentValues().apply {
                 put(MediaStore.Downloads.IS_PENDING, 0)
             }, null, null)
@@ -196,9 +195,11 @@ internal object DiagnosticExportStore {
         }
     }
 
-    private fun write(resolver: ContentResolver, uri: Uri, report: Source) {
+    private fun write(resolver: ContentResolver, uri: Uri, report: Source, available: (() -> Long)? = null) {
         val stream = resolver.openOutputStream(uri, "wt")
             ?: throw IOException("Report destination is unavailable")
-        stream.use { output -> copy(report, output) }
+        // An arbitrary SAF provider may stream to removable or remote storage. Its source file's
+        // volume cannot describe that destination; rely on provider write errors when unknown.
+        stream.use { output -> copy(report, output, available) }
     }
 }

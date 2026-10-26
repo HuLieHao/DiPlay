@@ -48,6 +48,8 @@ class CarPlayHostDisplaySizeTest {
 
     @Before fun setUp() {
         activity = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
+        // These fixtures exercise visible window negotiation unless a test explicitly stops it.
+        setField("isActivityStarted", true)
         AirPlayPersistence.saveAdaptPipResolution(activity, false)
         AirPlayPersistence.saveHarmanFullscreen(activity, false)
         // Source-only tests have no provisioned local authentication identity.
@@ -78,6 +80,34 @@ class CarPlayHostDisplaySizeTest {
         (getField("airPlayCommandExecutor") as ExecutorService).shutdownNow()
         CarPlayBackgroundSession.clear()
         controllerConstruction.close()
+    }
+
+    @Test fun stoppedWindowResizeCannotRestartRetainedSessionOrChangeItsCanvas() {
+        setField("isActivityStarted", true)
+        setField("activeDisplaySize", size(2240, 980))
+        allowStartup()
+        invoke("maybeStartCarPlay")
+        val controller = getField("controller")
+        val display = getField("sessionDisplay")
+        scheduleSize(2240, 1080) // queued just before stop
+        invoke("onStop")
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+        assertSame(controller, getField("controller"))
+        scheduleSize(2240, 1080) // callback delivered after stop
+        applySize(2240, 1080) // already-dequeued callback also needs a guard
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+        assertSame(display, getField("sessionDisplay"))
+        assertEquals(size(2240, 980), getField("activeDisplaySize"))
+        assertNull(getField("pendingDisplaySize"))
+        setField("isActivityStarted", true)
+        scheduleSize(2240, 980) // visible dimensions reread after returning
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+        assertSame(controller, getField("controller"))
+        assertEquals(0, getField("restartGeneration"))
+        // A real visible rotation still negotiates a portrait canvas.
+        scheduleSize(1080, 2240)
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+        assertEquals(1, getField("restartGeneration"))
     }
 
     @Test fun sameHostReconnectRetainsSeparateRunsAndLateTailInOriginalExport() {

@@ -115,7 +115,12 @@ class BydSettingsReconnectTest {
 
     private fun beginBatteryReconnect() {
         BydOutputSettings.setBatteryToIphone(activity, true)
-        val stop: ((() -> Unit) -> Unit) = { done -> reconnects++; done() }
+        val stop: ((() -> Unit) -> Unit) = { done ->
+            reconnects++
+            // The real host releases its slot before delivering teardown completion.
+            CarPlayBackgroundSession.clear()
+            done()
+        }
         ReflectionHelpers.setField(CarPlayBackgroundSession, "stopAction", stop)
         ReflectionHelpers.setField(activity, "vehicleDataReconnectPending", true)
         checkVehicleState()

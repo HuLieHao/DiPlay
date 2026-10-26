@@ -6,7 +6,7 @@
 
 本机目录：`/Users/huliehao/headunit/artifacts/apk/`。
 
-- APK：`BuickPlay-debug-0.2.21-buick.1-code47-next-20261026.apk`
+- APK：`BuickPlay-debug-0.2.21-buick.1-code47-final1-20261026.apk`
 - SHA-256：同名 APK 后加 `.sha256`，以交付时该文件为准。
 - 源码：`buickplay/next-diagnostics`；包内 `sourceRevision` 对应制包时的已提交版本，导出报告可核对。后续独立审查若修改代码，需另行生成并核对最终包，不能混用候选校验值。
 
@@ -14,12 +14,20 @@
 
 ```sh
 cd /Users/huliehao/headunit/artifacts/apk
-shasum -a 256 -c BuickPlay-debug-0.2.21-buick.1-code47-next-20261026.apk.sha256
+shasum -a 256 -c BuickPlay-debug-0.2.21-buick.1-code47-final1-20261026.apk.sha256
 adb devices -l
-adb -s <明确的红米序列号> install -r BuickPlay-debug-0.2.21-buick.1-code47-next-20261026.apk
+adb -s <明确的红米序列号> install -r BuickPlay-debug-0.2.21-buick.1-code47-final1-20261026.apk
 ```
 
 调试包与正式包是不同包名；正式包不会被此 APK 覆盖，设置也不会自动互通。同包名且签名一致的旧调试版可覆盖升级。安装前分别导出配置与“全部”诊断包，不清除数据、不卸载旧版。签名不匹配时停止覆盖安装并查明现有包，不能为了安装而直接卸载丢失日志。code46 对照包已保留在相同目录。
+
+## final1 审查修复与红米复验
+
+首个 code47 候选已由主流程在红米验证升级保留设置/日志、真实 CarPlay、局域网 HTTP 与本地 ZIP 校验、手动快照。该结果仅适用于首候选，不等于 FF-5000 验收。原始证据由主流程保存在 `artifacts/phone-debug/redmi-code47-20261026-112832/acceptance.md`；Safari 用户端保存尚待确认。
+
+首候选在红米暴露了返回桌面后的后台尺寸变化触发重握手：停止时 `2240×980 → 2240×1080`，返回又变回 `2240×980`。final1 已增加停止期间的尺寸协商保护与定时任务取消，返回后重读可见尺寸；仍保留前台真实旋转/多窗口处理。需用本候选再次实测，不能仅凭自动回归标为通过。
+
+本轮同时修正延迟连接请求被主动停止/新请求/页面销毁取消的边界、低空间及摘要清理时的归档元数据保护、外部文档导出不再扣源文件所在卷空间、应用音量条不可见/关闭时保留系统音量反馈，以及导出失败时临时 ZIP 清理。目标目录可确定时保留32MiB容量保护；任意 SAF 文档提供者的实际存储不可确定时依赖其写入错误，不把内部源卷剩余空间当作外部目标容量。
 
 ## 先理解日志与配置边界
 

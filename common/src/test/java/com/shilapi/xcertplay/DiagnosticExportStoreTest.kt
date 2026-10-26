@@ -32,6 +32,18 @@ class DiagnosticExportStoreTest {
         ShadowContentResolver.registerProviderInternal("media", provider)
     }
 
+    @Test fun opaqueDocumentProviderDoesNotChargeInternalSourceVolumeForExternalCopy() {
+        val physical = File.createTempFile("internal-report", ".zip")
+        val source = object : File(physical.path) { override fun getUsableSpace(): Long = 0L }
+        try {
+            val bytes = ByteArray(70_000) { (it % 251).toByte() }
+            physical.writeBytes(bytes)
+            DiagnosticExportStore.write(resolver, provider.uri, source)
+            assertArrayEquals(bytes, provider.file.readBytes())
+            assertArrayEquals(bytes, physical.readBytes())
+        } finally { physical.delete() }
+    }
+
     @Test fun localCopyRejectsInsufficientReserveBeforeWritingAndKeepsItOnSuccess() {
         val bytes = ByteArray(70_000) { 42 }
         val output = java.io.ByteArrayOutputStream()
