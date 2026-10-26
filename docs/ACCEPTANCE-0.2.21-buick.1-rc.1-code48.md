@@ -1,5 +1,7 @@
 # BuickPlay 0.2.21-buick.1-rc.1 / code48 验收版
 
+> 历史记录：命名已由 [code49验收版](ACCEPTANCE-0.2.21-buick.2-code49.md) 纠正，本文保留原包身份，不再作为当前交付入口。
+
 本版从已验证的 `aef0cde2`（code47 final7）整理，不额外合并其他仓库或上游提交。
 
 - 当前维护分支：`kaiyue`，固定目录`~/headunit/DiPlay`。已交付APK源自整理前的d15ab97d，归并后应用源码相同。
