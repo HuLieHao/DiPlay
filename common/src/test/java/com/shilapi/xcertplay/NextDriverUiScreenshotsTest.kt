@@ -102,7 +102,7 @@ class NextDriverUiScreenshotsTest {
                         }
                         assertTrue("Clock must draw legible text: ${clock.text}", visibleTextPixels > 0)
                         for (row in 0..2) {
-                            val expected = if (row == 1) android.graphics.Color.YELLOW else android.graphics.Color.WHITE
+                            val expected = if (row == 1) android.graphics.Color.BLACK else android.graphics.Color.WHITE
                             val top = ink.height * row / 3
                             val bottom = ink.height * (row + 1) / 3
                             var glyphPixels = 0

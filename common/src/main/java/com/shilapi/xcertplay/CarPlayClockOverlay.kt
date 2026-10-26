@@ -159,10 +159,8 @@ internal class CarPlayClockOverlay(
             if (row == 2) {
                 comparisonPaint.color = Color.BLACK
                 canvas.drawRect(0f, rowHeight * 2f, width.toFloat(), height.toFloat(), comparisonPaint)
-            } else {
-                comparisonPaint.setShadowLayer(3f * contentBounds.height() / 858f, 0f, 0f, Color.BLACK)
             }
-            comparisonPaint.color = if (row == 1) Color.YELLOW else Color.WHITE
+            comparisonPaint.color = if (row == 1) Color.BLACK else Color.WHITE
             canvas.drawText(label, width / 2f, rowHeight * (row + .5f) + baselineOffset, comparisonPaint)
         }
     }
