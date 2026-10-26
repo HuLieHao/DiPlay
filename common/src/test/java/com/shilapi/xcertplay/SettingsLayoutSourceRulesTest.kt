@@ -14,7 +14,8 @@ class SettingsLayoutSourceRulesTest {
     }
 
     @Test fun sizesAreNotPixelConstants() {
-        val pixelConstant = Regex("""\b[A-Z][A-Z0-9_]*_PX\b""")
+        // Android's unit selector is not an app size constant; video raster overlays use it.
+        val pixelConstant = Regex("""\b(?!COMPLEX_UNIT_PX\b)[A-Z][A-Z0-9_]*_PX\b""")
         assertEquals(emptyList<String>(), sources.flatMap { hits(it, pixelConstant) })
     }
 

@@ -1736,7 +1736,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             CarPlayClockSettings.positions.indexOf(CarPlayClockSettings.position(this)), reconnects = false, adaptiveHeight = true) {
             CarPlayClockSettings.save(this, position = CarPlayClockSettings.positions[it])
         }
-        choice(card, getString(R.string.settings_clock_size), CarPlayClockSettings.sizes.map { "$it sp" },
+        choice(card, getString(R.string.settings_clock_size), CarPlayClockSettings.sizes.map { "${it * 5}%" },
             CarPlayClockSettings.sizes.indexOf(CarPlayClockSettings.size(this)).coerceAtLeast(0), reconnects = false, adaptiveHeight = true) {
             CarPlayClockSettings.save(this, size = CarPlayClockSettings.sizes[it])
         }

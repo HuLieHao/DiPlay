@@ -86,6 +86,7 @@ class NextDriverUiScreenshotsTest {
                     val root = android.widget.FrameLayout(activity).apply { setBackgroundColor(android.graphics.Color.rgb(40, 52, 68)) }
                     root.addView(TextView(activity).apply { text = "Video viewport fixture"; setTextColor(android.graphics.Color.WHITE) })
                     val clock = CarPlayClockOverlay(activity, android.os.Handler(android.os.Looper.getMainLooper())) { 1_800_000_020_000L }
+                    clock.setVideoContentBounds(android.graphics.RectF(0f, 0f, width.toFloat(), 360f))
                     root.addView(clock)
                     activity.setContentView(root)
                     CarPlayClockSettings.save(activity, if (night) "left" else "right", 24)

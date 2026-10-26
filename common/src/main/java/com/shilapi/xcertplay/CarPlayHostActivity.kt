@@ -5854,6 +5854,12 @@ class CarPlayHostActivity : ComponentActivity() {
         val content = contentRect(viewWidth, viewHeight)
         blackCornerOverlay?.setContentBounds(RectF(content.left, content.top,
             content.left + content.width, content.top + content.height))
+        // viewAreas may crop an oversized canvas; anchor to the visible video intersection.
+        clockOverlay?.setVideoContentBounds(RectF(
+            content.left.coerceAtLeast(0f) + view.left,
+            content.top.coerceAtLeast(0f) + view.top,
+            (content.left + content.width).coerceAtMost(viewWidth.toFloat()) + view.left,
+            (content.top + content.height).coerceAtMost(viewHeight.toFloat()) + view.top))
         val fallback = fallbackVideoView
         if (fallback != null) {
             val bounds = CarPlaySurfaceBounds.from(content)
