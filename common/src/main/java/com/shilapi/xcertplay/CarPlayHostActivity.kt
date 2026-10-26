@@ -1927,7 +1927,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onDestroy() {
         CarPlayBackgroundSession.cancelWait(this)
-        mainHandler.removeCallbacks(backgroundSessionReady)
+        backgroundSessionReady?.let(mainHandler::removeCallbacks)
         runCatching { unregisterReceiver(bluetoothOnReceiver) }
         mainHandler.removeCallbacks(hideTemporarySystemBars)
         dropHeldTouch()
@@ -5364,7 +5364,8 @@ class CarPlayHostActivity : ComponentActivity() {
         if (!backgroundSessionMatchesView(snapshot.sink.videoPacingEnabled, smoothVideo)) {
             appendLog("Background session smooth video=${snapshot.sink.videoPacingEnabled} differs from this view; " +
                 "stopping it instead of adopting it")
-            CarPlayBackgroundSession.stop(manual = false) { mainHandler.post { if (!isDestroyed) maybeStartCarPlay() } }
+            val ticket = CarPlayBackgroundSession.automaticConnectionTicket()
+            CarPlayBackgroundSession.stop(manual = false) { postBackgroundSessionReady(ticket) }
             return false
         }
         displayDiagnosticAttempt = DisplayDiagnosticSnapshot.currentAttempt(this)
@@ -5834,22 +5835,33 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveMaximumDetectedDisplay(this, width, height)
     }
 
-    private val backgroundSessionReady = Runnable {
-        if (!isDestroyed && !shuttingDown.get()) {
-            appendLog("Background session readiness changed generation=$restartGeneration")
-            maybeStartCarPlay()
+    private var backgroundSessionReady: Runnable? = null
+
+    private fun postBackgroundSessionReady(ticket: Long?) {
+        // Check before replacing queued work as well as at execution: an old completion must
+        // neither revive a manually stopped connection nor cancel a newer explicit attempt.
+        if (ticket == null || CarPlayBackgroundSession.automaticConnectionTicket() != ticket) return
+        backgroundSessionReady?.let(mainHandler::removeCallbacks)
+        val ready = Runnable {
+            if (!isDestroyed && !shuttingDown.get() &&
+                CarPlayBackgroundSession.automaticConnectionTicket() == ticket) {
+                appendLog("Background session readiness changed generation=$restartGeneration")
+                maybeStartCarPlay()
+            }
         }
+        backgroundSessionReady = ready
+        mainHandler.post(ready)
     }
 
     private fun maybeStartCarPlay() {
         if (shuttingDown.get()) return
         val sessionRevision = CarPlayBackgroundSession.revision()
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) {
+            val ticket = CarPlayBackgroundSession.automaticConnectionTicket()
             if (!adoptBackgroundSession()) {
                 appendLog("Background session readiness wait revision=$sessionRevision generation=$restartGeneration")
                 CarPlayBackgroundSession.whenChanged(this, sessionRevision) {
-                    mainHandler.removeCallbacks(backgroundSessionReady)
-                    mainHandler.post(backgroundSessionReady)
+                    postBackgroundSessionReady(ticket)
                 }
             }
             return
@@ -6185,7 +6197,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun shutdown(terminateProcess: Boolean, reason: String, completion: () -> Unit = {}) {
         if (!shuttingDown.compareAndSet(false, true)) { completion(); return }
         CarPlayBackgroundSession.cancelWait(this)
-        mainHandler.removeCallbacks(backgroundSessionReady)
+        backgroundSessionReady?.let(mainHandler::removeCallbacks)
         callPopupSessionReady = false
         updateCallPopupGuard()
         resetSidePanel()

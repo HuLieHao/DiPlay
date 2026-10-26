@@ -56,6 +56,7 @@ class SmoothVideoHostLifecycleTest {
 
     @Before fun setUp() {
         CarPlayBackgroundSession.clear()
+        CarPlayBackgroundSession.allowAutomaticConnection()
         activity = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
         AirPlayPersistence.saveAdaptPipResolution(activity, false)
         AirPlayPersistence.saveMfiTarget(activity, MfiTarget.USB_CH341)
@@ -86,6 +87,7 @@ class SmoothVideoHostLifecycleTest {
         CarPlayBackgroundSession.clear()
         AirPlayPersistence.saveSmoothVideo(activity, false)
         controllerConstruction.close()
+        CarPlayBackgroundSession.allowAutomaticConnection()
     }
 
     // (1) The maintainer's sequence: Smooth video turned on, the reconnect stopped at a prerequisite, so
@@ -106,7 +108,7 @@ class SmoothVideoHostLifecycleTest {
         assertNull(getField("controller"))
         assertEquals(1, stop.calls)
 
-        // The non-owner path polls every 500 ms while the other host is still stopping.
+        // Repeated readiness checks while the other host stops must not request another stop.
         invoke("maybeStartCarPlay")
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2_100))
         assertEquals("One stop request per retained session, however often the host retries", 1, stop.calls)
@@ -125,6 +127,43 @@ class SmoothVideoHostLifecycleTest {
         assertNotNull(getField("controller"))
         assertNotSame(oldController, getField("controller"))
         assertEquals(1, stop.calls)
+    }
+
+    @Test fun manualDisconnectDuringPacingStopCancelsMismatchCompletion() {
+        assertStopDuringPacingTeardown("adoptBackgroundSession", allowNewBeforeCompletion = false)
+    }
+
+    @Test fun newExplicitGenerationCannotReviveOldReadinessOrMismatchCallbacks() {
+        assertStopDuringPacingTeardown("maybeStartCarPlay", allowNewBeforeCompletion = true)
+    }
+
+    @Test fun alreadyQueuedReadinessCannotStartAfterStopAndNewExplicitGeneration() {
+        assertStopDuringPacingTeardown("maybeStartCarPlay", allowNewBeforeCompletion = true,
+            completeBeforeManualStop = true)
+    }
+
+    private fun assertStopDuringPacingTeardown(entry: String, allowNewBeforeCompletion: Boolean,
+        completeBeforeManualStop: Boolean = false) {
+        AirPlayPersistence.saveSmoothVideo(activity, true)
+        setField("smoothVideo", true)
+        allowStartup()
+        val oldController = mock(CarPlayController::class.java)
+        val oldSink = sink(pacingDelayMillis = 0)
+        val stop = DeferredStop()
+        CarPlayBackgroundSession.store(oldController, oldSink, 1920, 990, Any(), display, stop::invoke)
+        invoke(entry)
+        assertEquals(1, stop.calls)
+        if (completeBeforeManualStop) stop.complete()
+        CarPlayBackgroundSession.stop()
+        if (allowNewBeforeCompletion) CarPlayBackgroundSession.allowAutomaticConnection()
+        if (!completeBeforeManualStop) stop.complete()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertNull("A deferred restart from before manual disconnect must not create a controller", getField("controller"))
+        assertNull(getField("sink"))
+        if (!allowNewBeforeCompletion) CarPlayBackgroundSession.allowAutomaticConnection()
+        invoke("maybeStartCarPlay")
+        assertNotNull("A fresh explicit connection is still allowed", getField("controller"))
+        assertNotSame(oldController, getField("controller"))
     }
 
     @Test fun retainedSessionBecomingReadyIsAdoptedWithoutPollingDelay() {
