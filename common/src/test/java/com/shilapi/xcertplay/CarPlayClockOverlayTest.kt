@@ -75,16 +75,16 @@ class CarPlayClockOverlayTest {
         assertEquals(20, params.leftMargin)
         assertEquals(812, params.topMargin)
         assertEquals(32f, overlay.textSize, .01f)
-        assertEquals(android.graphics.Color.WHITE, overlay.currentTextColor)
+        assertEquals(android.graphics.Color.YELLOW, overlay.currentTextColor)
         assertEquals(android.graphics.Color.BLACK, overlay.shadowColor)
-        assertEquals(2f, overlay.shadowRadius, .01f)
+        assertEquals(3f, overlay.shadowRadius, .01f)
         val originalScaledDensity = activity.resources.displayMetrics.scaledDensity
         activity.resources.displayMetrics.scaledDensity = 3f
         overlay.update(true, false)
         assertEquals(32f, overlay.textSize, .01f)
         overlay.setVideoContentBounds(android.graphics.RectF(40f, 200f, 1020f, 629f))
         assertEquals(16f, overlay.textSize, .01f)
-        assertEquals(1f, overlay.shadowRadius, .01f)
+        assertEquals(1.5f, overlay.shadowRadius, .01f)
         CarPlayClockSettings.save(activity, "right", 24)
         overlay.update(true, false)
         val right = overlay.layoutParams as FrameLayout.LayoutParams
@@ -162,7 +162,7 @@ class CarPlayClockOverlayTest {
         val dayColor = overlay.currentTextColor
         overlay.update(true, true)
         assertEquals(dayColor, overlay.currentTextColor)
-        assertEquals(android.graphics.Color.WHITE, overlay.currentTextColor)
+        assertEquals(android.graphics.Color.YELLOW, overlay.currentTextColor)
         overlay.update(false, true)
         CarPlayClockSettings.save(activity, "left", 16)
         shadowOf(Looper.getMainLooper()).idle()
