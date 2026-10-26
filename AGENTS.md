@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Personal workflow
+
+Use `/Users/huliehao/headunit/DiPlay` on `kaiyue` for this single-owner, single-head-unit project. Do not create feature/release branches or additional worktrees by default. Preserve unrelated changes. Increment versionCode for each new delivered APK; see `docs/BRANCH-WORKFLOW.md`. Archived workspaces under `../artifacts/repository-backup` are not development sources.
+
 Instructions for coding agents that work on DiPlay.
 
 ## Checks

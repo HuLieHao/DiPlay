@@ -2,7 +2,7 @@
 
 本版从已验证的 `aef0cde2`（code47 final7）整理，不额外合并其他仓库或上游提交。
 
-- 分支：`release/0.2.21-buick.1`
+- 当前维护分支：`kaiyue`，固定目录`~/headunit/DiPlay`。已交付APK源自整理前的d15ab97d，归并后应用源码相同。
 - 应用版本：`0.2.21-buick.1-rc.1-debug`，versionCode48
 - 应用名称：BuickPlay-debug；包名：`com.shihab.diplay.hudtest`
 - 构建任务：`:mobile:assembleStandaloneDebug`，须通过本地环境变量提供认证资源。
