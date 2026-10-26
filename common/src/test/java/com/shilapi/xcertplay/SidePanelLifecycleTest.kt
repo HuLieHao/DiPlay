@@ -43,6 +43,24 @@ class SidePanelLifecycleTest {
         (get("airPlayCommandExecutor") as ExecutorService).shutdownNow()
     }
 
+    @Test fun stoppingTheHostPausesRefreshWithoutClosingThePanelOrSession() {
+        activity.javaClass.getDeclaredMethod("onStop").apply { isAccessible = true }.invoke(activity)
+        assertFalse(handler.hasCallbacks(refresh))
+        assertEquals(true, get("sidePanelShown"))
+        assertEquals(View.VISIBLE, panel.visibility)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(10))
+        assertFalse(handler.hasCallbacks(refresh))
+    }
+
+    @Test fun returningToAVisibleHostRestartsExactlyOnePanelRefresh() {
+        activity.javaClass.getDeclaredMethod("onStop").apply { isAccessible = true }.invoke(activity)
+        assertFalse(handler.hasCallbacks(refresh))
+        activity.javaClass.getDeclaredMethod("onStart").apply { isAccessible = true }.invoke(activity)
+        assertTrue(handler.hasCallbacks(refresh))
+        activity.javaClass.getDeclaredMethod("onStop").apply { isAccessible = true }.invoke(activity)
+        assertFalse(handler.hasCallbacks(refresh))
+    }
+
     @Test fun destroyingAHostWithThePanelOpenCancelsItsRepeatedRefresh() {
         activity.javaClass.getDeclaredMethod("onDestroy").apply { isAccessible = true }.invoke(activity)
         assertPanelStopped()

@@ -15,7 +15,8 @@ class PhoneBluetoothReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != BluetoothDevice.ACTION_ACL_CONNECTED ||
             !DiPlayPreferences.connectOnPhoneBluetooth(context) ||
-            CarPlayBackgroundSession.hasSession()) return
+            CarPlayBackgroundSession.hasSession() ||
+            CarPlayBackgroundSession.automaticConnectionTicket() == null) return
         val selected = DiPlayPreferences.phoneAddress(context) ?: return
         if (Build.VERSION.SDK_INT >= 31 &&
             context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) return
@@ -32,9 +33,15 @@ class PhoneBluetoothReceiver : BroadcastReceiver() {
         // another receiver instance cannot open a second connection from the same event burst.
         val prefs = context.getSharedPreferences("diplay_phone_wake", Context.MODE_PRIVATE)
         val now = SystemClock.elapsedRealtime()
+        // BOOT_COUNT is public since API24. Unknown identity is scoped to this process.
+        val boot = android.provider.Settings.Global.getInt(context.contentResolver,
+            android.provider.Settings.Global.BOOT_COUNT, -1)
         val previous = prefs.getLong("last_launch_elapsed", 0)
-        if (prefs.contains("last_launch_elapsed") && now >= previous && now - previous < 15_000) return
-        prefs.edit().putLong("last_launch_elapsed", now).commit()
+        val sameBoot = if (boot >= 0) prefs.getInt("last_launch_boot", -1) == boot
+            else prefs.getString("last_launch_process", null) == processWakeScope
+        if (sameBoot && prefs.contains("last_launch_elapsed") && now >= previous && now - previous < 15_000) return
+        prefs.edit().putLong("last_launch_elapsed", now).putInt("last_launch_boot", boot)
+            .putString("last_launch_process", processWakeScope).commit()
         PhoneWakeDiagnostics.record(context, "matched")
         val launch = Intent(context, DiPlayActivity::class.java).apply {
             putExtra(EXTRA_AUTO_CONNECT, true)
@@ -49,6 +56,7 @@ class PhoneBluetoothReceiver : BroadcastReceiver() {
     }
 
     companion object {
+        private val processWakeScope = java.util.UUID.randomUUID().toString()
         const val EXTRA_AUTO_CONNECT = "com.shihab.diplay.AUTO_CONNECT_SELECTED_PHONE"
     }
 }

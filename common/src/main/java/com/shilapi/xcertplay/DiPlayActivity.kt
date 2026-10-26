@@ -422,7 +422,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 initialLaunch = false
                 startCarHotspotOnLaunch()
             }
-            handler.post { connect(true) }
+            postAutomaticConnection(true)
         }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -449,7 +449,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 initialLaunch = false
                 startCarHotspotOnLaunch()
             }
-            handler.post { connect(true) }
+            postAutomaticConnection(true)
+        }
+    }
+    private fun postAutomaticConnection(wireless: Boolean) {
+        val ticket = CarPlayBackgroundSession.automaticConnectionTicket() ?: return
+        handler.post {
+            if (!isDestroyed && CarPlayBackgroundSession.acceptsAutomaticConnection(ticket)) connect(wireless)
         }
     }
     private fun consumeBluetoothAutoConnectIntent(intent: Intent): Boolean {
@@ -551,7 +557,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             startCarHotspotOnLaunch()
             if (setupError == null && !CarPlayBackgroundSession.hasSession() &&
                 DiPlayPreferences.autoConnect(this) && intent.getStringExtra("page") == null && page != "setup") {
-                handler.post { connect(DiPlayPreferences.autoConnectWireless(this)) }
+                postAutomaticConnection(DiPlayPreferences.autoConnectWireless(this))
             }
         }
     }
@@ -5714,6 +5720,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private fun connect(wireless: Boolean) {
+        CarPlayBackgroundSession.allowAutomaticConnection()
         startupHotspotCancelled = true
         if (wireless && pendingCarHotspotSetup) { toast(getString(R.string.save_your_hotspot_details_in_connection_setup_first)); page = "connection"; render(); return }
         if (setupError != null) { toast(setupError!!); return }
@@ -5740,7 +5747,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             AirPlayPersistence.saveWirelessEnabled(this, wireless)
             openProjection()
         }
-        if (CarPlayBackgroundSession.hasSession()) CarPlayBackgroundSession.stop { runOnUiThread { open() } }
+        if (CarPlayBackgroundSession.hasSession()) CarPlayBackgroundSession.stop(manual = false) { runOnUiThread { open() } }
         else open()
     }
     private fun openProjection() {

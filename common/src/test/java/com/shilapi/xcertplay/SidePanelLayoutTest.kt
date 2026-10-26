@@ -86,6 +86,8 @@ class SidePanelLayoutTest {
     }
 
     @Test fun adoptingAnOpenSidePanelRestoresItsViewAndRefreshWithoutChangingTheArea() {
+        // A visible host refreshes; get() alone has not entered Android's STARTED state.
+        set("isActivityStarted", true)
         val areas = CarPlayViewAreas.build(2560, 1440, CarPlayDock.AUTOMATIC, null, sidePanel = true)!!
         val selected = areas.sidePanel()!!
         areas.use(selected)

@@ -56,6 +56,22 @@ class WirelessStartupRecoveryTest {
     }
     private fun budget() = ReflectionHelpers.getField<WirelessStartupRetryBudget>(activity, "startupRetryBudget")
 
+    @Test fun shutdownImmediatelyCancelsPendingRetryAndBluetoothAcceleration() {
+        report(status = CarPlayStatus.Failed(BluetoothRadioCheck.RADIO_OFF))
+        val pending = ReflectionHelpers.getField<Runnable>(activity, "pendingReconnect")
+        val handler = ReflectionHelpers.getField<Handler>(activity, "mainHandler")
+        assertTrue(handler.hasCallbacks(pending))
+        ReflectionHelpers.callInstanceMethod<Unit>(activity, "shutdown",
+            from(Boolean::class.javaPrimitiveType, false), from(String::class.java, "test stop"),
+            from(Function0::class.java, {}))
+        assertFalse(handler.hasCallbacks(pending))
+        assertNull(ReflectionHelpers.getField<Runnable?>(activity, "pendingReconnect"))
+        assertFalse(ReflectionHelpers.getField(activity, "reconnectScheduled"))
+        bluetooth(BluetoothAdapter.STATE_ON)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(handler.hasCallbacks(pending))
+    }
+
     @Test fun duplicateFailureAndCleanupErrorScheduleOnlyOneRetry() {
         report()
         report()

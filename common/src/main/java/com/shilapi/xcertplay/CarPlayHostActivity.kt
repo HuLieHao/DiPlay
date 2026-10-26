@@ -733,8 +733,9 @@ class CarPlayHostActivity : ComponentActivity() {
     private var sidePanelShown = false
     private val sidePanelTick = object : Runnable {
         override fun run() {
+            if (!isActivityStarted || !sidePanelShown) return
             refreshSidePanel()
-            if (sidePanelShown) mainHandler.postDelayed(this, SIDE_PANEL_REFRESH_MILLIS)
+            mainHandler.postDelayed(this, SIDE_PANEL_REFRESH_MILLIS)
         }
     }
     private val teardownExecutor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -1163,6 +1164,8 @@ class CarPlayHostActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         isActivityStarted = true
+        mainHandler.removeCallbacks(sidePanelTick)
+        if (sidePanelShown) { startSidePanelTyres(); sidePanelTick.run() }
         updateDebugOverlays()
         logThemeState(ThemeModeDiagnostics.Source.START, resources.configuration)
         mainHandler.removeCallbacks(pollConfiguration)
@@ -1825,6 +1828,8 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onStop() {
         mainHandler.removeCallbacks(refreshWaitingProgress)
+        mainHandler.removeCallbacks(sidePanelTick)
+        com.shilapi.xcertplay.hud.BydTyreStatus.stop()
         fpsCounter?.stop()
         closePicturePanel()
         // The controller, USB/iAP2 link, and VPN attachment intentionally outlive the UI.
@@ -1921,6 +1926,8 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        CarPlayBackgroundSession.cancelWait(this)
+        mainHandler.removeCallbacks(backgroundSessionReady)
         runCatching { unregisterReceiver(bluetoothOnReceiver) }
         mainHandler.removeCallbacks(hideTemporarySystemBars)
         dropHeldTouch()
@@ -2585,7 +2592,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     // Tyres through the head unit's adb shell; the reader stops by itself where there is no BYD autoservice.
     private fun startSidePanelTyres() {
-        com.shilapi.xcertplay.hud.BydTyreStatus.start(this)
+        if (isActivityStarted) com.shilapi.xcertplay.hud.BydTyreStatus.start(this)
     }
 
     // Stops the hints and the blur of a host that goes away.
@@ -4977,8 +4984,8 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun decodeAirPlayIcon(encoded: ByteArray): AirPlayIcon? {
-        val (size, bytes) = AirPlayIconSizing.fit(encoded) ?: return null
-        if (bytes !== encoded) appendLog("CarPlay car-button icon resized bytes=${encoded.size}->${bytes.size} pixels=$size")
+        val (size, bytes) = preparedAirPlayIconCache.prepare(encoded) ?: return null
+        appendLog("CarPlay car-button icon prepared bytes=${encoded.size}->${bytes.size} pixels=$size; content cache enabled")
         return AirPlayIcon(size, size, bytes)
     }
 
@@ -5357,7 +5364,7 @@ class CarPlayHostActivity : ComponentActivity() {
         if (!backgroundSessionMatchesView(snapshot.sink.videoPacingEnabled, smoothVideo)) {
             appendLog("Background session smooth video=${snapshot.sink.videoPacingEnabled} differs from this view; " +
                 "stopping it instead of adopting it")
-            CarPlayBackgroundSession.stop { mainHandler.post { if (!isDestroyed) maybeStartCarPlay() } }
+            CarPlayBackgroundSession.stop(manual = false) { mainHandler.post { if (!isDestroyed) maybeStartCarPlay() } }
             return false
         }
         displayDiagnosticAttempt = DisplayDiagnosticSnapshot.currentAttempt(this)
@@ -5431,9 +5438,9 @@ class CarPlayHostActivity : ComponentActivity() {
         val serviceReused = snapshot.controller.hasActiveAirPlayAttachment()
         appendLog(
             if (serviceReused) {
-                "Reusing existing background CarPlay service"
+                "Reusing existing background CarPlay service generation=$generation"
             } else {
-                "Reusing existing background CarPlay session"
+                "Reusing existing background CarPlay session generation=$generation"
             },
         )
         setConnectionStage(
@@ -5827,12 +5834,27 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveMaximumDetectedDisplay(this, width, height)
     }
 
+    private val backgroundSessionReady = Runnable {
+        if (!isDestroyed && !shuttingDown.get()) {
+            appendLog("Background session readiness changed generation=$restartGeneration")
+            maybeStartCarPlay()
+        }
+    }
+
     private fun maybeStartCarPlay() {
         if (shuttingDown.get()) return
+        val sessionRevision = CarPlayBackgroundSession.revision()
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) {
-            if (!adoptBackgroundSession()) mainHandler.postDelayed({ maybeStartCarPlay() }, 500)
+            if (!adoptBackgroundSession()) {
+                appendLog("Background session readiness wait revision=$sessionRevision generation=$restartGeneration")
+                CarPlayBackgroundSession.whenChanged(this, sessionRevision) {
+                    mainHandler.removeCallbacks(backgroundSessionReady)
+                    mainHandler.post(backgroundSessionReady)
+                }
+            }
             return
         }
+        CarPlayBackgroundSession.cancelWait(this)
         if (controller == null && adoptBackgroundSession()) return
         // The video view is chosen once per activity; a changed Smooth video or Direct video output
         // setting needs a new one.
@@ -6162,12 +6184,18 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun shutdown(terminateProcess: Boolean, reason: String, completion: () -> Unit = {}) {
         if (!shuttingDown.compareAndSet(false, true)) { completion(); return }
+        CarPlayBackgroundSession.cancelWait(this)
+        mainHandler.removeCallbacks(backgroundSessionReady)
         callPopupSessionReady = false
         updateCallPopupGuard()
         resetSidePanel()
         releaseSidePanelEffects()
         startupRetryBudget.disconnected()
         restartGeneration += 1
+        pendingReconnect?.let(mainHandler::removeCallbacks)
+        pendingReconnect = null
+        reconnectScheduled = false
+        reconnectWaitsForBluetooth = false
         mainHandler.removeCallbacks(applyDisplaySize)
         val oldController = controller
         val oldSink = sink
@@ -6780,6 +6808,7 @@ class CarPlayHostActivity : ComponentActivity() {
         private const val CENTER_MAP_IDLE_MILLIS = 3_000L // a reconnect is quicker; a session end is not
         private const val CLUSTER_IDLE_RELEASE_MILLIS = 15_000L
         const val LOG_RETENTION_MILLIS = 5 * 60_000L
+        private val preparedAirPlayIconCache = PreparedAirPlayIconCache()
         const val DISPLAY_CHANGE_DEBOUNCE_MILLIS = 500L
         const val CONFIGURATION_POLL_INTERVAL_MILLIS = 2_000L
         const val RECONNECT_DELAY_MILLIS = 2_000L
@@ -6851,6 +6880,17 @@ internal fun statusBarHiddenByAnotherWindow(display: CarPlaySessionDisplay, widt
 
 /** Process-local hand-off for keeping the CarPlay session alive while no Activity is visible. */
 internal object CarPlayBackgroundSession {
+    @Volatile private var automaticConnectionGeneration = 0L
+    @Volatile private var automaticConnectionStopped = false
+    @Synchronized fun allowAutomaticConnection() {
+        automaticConnectionGeneration++
+        automaticConnectionStopped = false
+    }
+    @Synchronized fun automaticConnectionTicket(): Long? =
+        if (automaticConnectionStopped) null else automaticConnectionGeneration
+    @Synchronized fun acceptsAutomaticConnection(ticket: Long): Boolean =
+        !automaticConnectionStopped && automaticConnectionGeneration == ticket && !hasSession()
+
     @Volatile var active = false
     @Volatile var callPopupReady = false
     /** The running session's hotspot: a host that adopts the session never saw its HotspotReady. */
@@ -6861,10 +6901,28 @@ internal object CarPlayBackgroundSession {
     @Synchronized fun isOwner(candidate: Any): Boolean = owner === candidate
     @Synchronized fun hasSession(): Boolean = stopAction != null || stopping
     private val stopWaiters = mutableListOf<() -> Unit>()
+    private var sessionRevision = 0L
+    private val changeWaiters = mutableMapOf<Any, () -> Unit>()
+    @Synchronized fun revision(): Long = sessionRevision
+    /** One-shot readiness notification; callbacks only enqueue work, never adopt under this lock. */
+    @Synchronized fun whenChanged(candidate: Any, observedRevision: Long, enqueue: () -> Unit) {
+        if (sessionRevision != observedRevision) enqueue() else changeWaiters[candidate] = enqueue
+    }
+    @Synchronized fun cancelWait(candidate: Any) { changeWaiters.remove(candidate) }
+    private fun changed() {
+        sessionRevision++
+        val callbacks = changeWaiters.values.toList()
+        changeWaiters.clear()
+        callbacks.forEach { it() }
+    }
 
-    fun stop(completion: () -> Unit = {}) {
+    fun stop(manual: Boolean = true, completion: () -> Unit = {}) {
         val action: (((() -> Unit)) -> Unit)?
         synchronized(this) {
+            if (manual) {
+                automaticConnectionStopped = true
+                automaticConnectionGeneration++
+            }
             if (stopping) { stopWaiters.add(completion); return }
             action = stopAction
             if (action != null) { stopping = true; stopWaiters.add(completion) }
@@ -6873,6 +6931,7 @@ internal object CarPlayBackgroundSession {
         action.invoke {
             val callbacks = synchronized(this) {
                 stopping = false
+                changed()
                 stopWaiters.toList().also { stopWaiters.clear() }
             }
             callbacks.forEach { it() }
@@ -6915,6 +6974,7 @@ internal object CarPlayBackgroundSession {
         this.width = width
         this.height = height
         this.display = display
+        changed()
     }
 
     @Synchronized
@@ -6929,5 +6989,6 @@ internal object CarPlayBackgroundSession {
         width = 0
         height = 0
         display = null
+        changed()
     }
 }

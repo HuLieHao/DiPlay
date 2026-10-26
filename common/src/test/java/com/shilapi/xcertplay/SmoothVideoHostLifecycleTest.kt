@@ -127,6 +127,22 @@ class SmoothVideoHostLifecycleTest {
         assertEquals(1, stop.calls)
     }
 
+    @Test fun retainedSessionBecomingReadyIsAdoptedWithoutPollingDelay() {
+        val stop: ((() -> Unit) -> Unit) = { }
+        org.robolectric.util.ReflectionHelpers.setField(CarPlayBackgroundSession, "stopAction", stop)
+        org.robolectric.util.ReflectionHelpers.setField(CarPlayBackgroundSession, "owner", Any())
+        invoke("maybeStartCarPlay")
+        assertNull(getField("controller"))
+        val controller = mock(CarPlayController::class.java)
+        `when`(controller.nowPlayingSnapshot()).thenReturn(CarPlayNowPlaying())
+        val retainedSink = sink(pacingDelayMillis = 0)
+        CarPlayBackgroundSession.store(controller, retainedSink, 1920, 990, Any(), display, stop)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertSame(controller, getField("controller"))
+        assertSame(retainedSink, getField("sink"))
+        assertTrue(CarPlayBackgroundSession.isOwner(activity))
+    }
+
     @Test fun aBackgroundSessionWhosePacingMatchesTheViewIsAdopted() {
         for (smooth in listOf(true, false)) {
             CarPlayBackgroundSession.clear()

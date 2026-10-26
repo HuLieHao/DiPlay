@@ -6,6 +6,7 @@ import android.graphics.Color
 import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -23,6 +24,21 @@ class AirPlayIconSizingTest {
         // Noise keeps the PNG large, like a cropped photo.
         for (y in 0 until height) for (x in 0 until width) bitmap.setPixel(x, y, Color.rgb((x * 31 + y * 17) % 256, (x * y) % 256, (x + y * 7) % 256))
         return ByteArrayOutputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it); it.toByteArray() }
+    }
+
+    @Test fun warmPreparationReusesOnlyTheMostRecentContentAndOwnsItsBytes() {
+        val cache = PreparedAirPlayIconCache()
+        val original = png(128, 128)
+        val unchanged = original.copyOf()
+        val first = cache.prepare(original)!!
+        original.fill(0)
+        assertSame(first, cache.prepare(unchanged))
+        assertTrue(first.second.contentEquals(unchanged))
+        val replacement = png(192, 192)
+        assertEquals(192, cache.prepare(replacement)!!.first)
+        assertNotSame(first, cache.prepare(unchanged))
+        assertNull(cache.prepare(byteArrayOf(1, 2, 3)))
+        assertNotSame(first, cache.prepare(unchanged))
     }
 
     @Test fun aCroppedPhotoIconIsSentAtThePackagedIconSize() {
