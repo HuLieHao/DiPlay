@@ -8,6 +8,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FileReportResponseTest {
+    @Test fun archiveDownloadUsesZipMimeType() {
+        val output = ByteArrayOutputStream()
+        FileReportResponse.write(ByteArrayInputStream(byteArrayOf(1)), output, 1, "report.zip") {}
+        assertTrue(output.toString("UTF-8").contains("Content-Type: application/zip"))
+    }
     @Test fun firstReadFailureDoesNotCommitSuccessHeaders() {
         val input = object : InputStream() { override fun read(): Int = throw IOException("read failed") }
         val output = ByteArrayOutputStream()

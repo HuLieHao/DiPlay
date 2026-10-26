@@ -173,8 +173,13 @@ class WheelKeyServiceReportTest {
     @Test fun theDiagnosticReportCarriesTheWheelKeyLines() {
         assertFalse(press(KeyEvent.KEYCODE_F7))
         val activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
-        val text = activity.javaClass.getDeclaredMethod("diagnosticReportText", Context::class.java)
-            .apply { isAccessible = true }.invoke(activity, service.applicationContext) as String
+        val snapshot = activity.javaClass.getDeclaredMethod("diagnosticReportFile", Context::class.java, String::class.java)
+            .apply { isAccessible = true }.invoke(activity, service.applicationContext, "all") as java.io.File
+        val text = try {
+            java.util.zip.ZipFile(snapshot).use { zip ->
+                zip.getInputStream(zip.getEntry("diagnostics.txt")).bufferedReader().use { it.readText() }
+            }
+        } finally { snapshot.delete() }
         val lines = text.lines()
         val serviceLine = lines.indexOfFirst { it.startsWith("Wheel key service: ") }
         assertTrue(text, serviceLine >= 0)

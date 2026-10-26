@@ -1029,4 +1029,10 @@
     <string name="cluster_projection_shape_description">Half screen keeps the speed and status readouts the cluster normally shows beside the map; full screen lets the map fill the cluster. DiPlay sets the shape whenever the CarPlay map appears, which otherwise overrides the shape picked on the car. Needs ADB over network on the head unit.</string>
     <string name="settings_cluster_speedometer_album_color">Use album color for speedometer background</string>
     <string name="settings_cluster_speedometer_album_color_description">Match the album frame color with smooth transitions. Keeps the selected opacity.</string>
+    <string name="settings_archive_today">Today</string>
+    <string name="settings_archive_yesterday">Yesterday</string>
+    <string name="settings_archive_week">Last 7 days</string>
+    <string name="settings_archive_all">All retained sessions</string>
+    <string name="settings_archive_session">Choose a session (device date may be wrong)</string>
+    <string name="settings_archive_preview">Preview is limited to 96 KiB. The ZIP contains original logs, summaries, exceptions, network captures and a manifest.</string>
 </resources>

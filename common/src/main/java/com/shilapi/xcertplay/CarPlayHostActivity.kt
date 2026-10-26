@@ -1967,8 +1967,8 @@ class CarPlayHostActivity : ComponentActivity() {
         currentSurfaceTexture = null
         fallbackVideoView = null
         fallbackVideoBounds = null
-        sessionLog?.append("Activity destroyed")
-        sessionLog?.close()
+        AsyncDiagnosticLog.append(sessionLog, "Activity destroyed")
+        AsyncDiagnosticLog.close(sessionLog)
         sessionLog = null
         super.onDestroy()
     }
@@ -6619,12 +6619,12 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun appendLog(message: String) {
-        val safe = DiagnosticRedactor.redact(message) ?: return
-        sessionLog?.append(formattedLogLine(safe, System.currentTimeMillis()))
+        val safe = DiagnosticRedactor.original(message)
+        AsyncDiagnosticLog.append(sessionLog, safe)
     }
 
     private fun appendFileLog(message: String) {
-        sessionLog?.append(formattedLogLine(message, System.currentTimeMillis()))
+        AsyncDiagnosticLog.append(sessionLog, message)
     }
 
     private fun formattedLogLine(message: String, nowMillis: Long): String =

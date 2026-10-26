@@ -5,6 +5,30 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AsyncDiagnosticLogTest {
+    @Test fun orderlyCloseDrainsItsQueuedTailBeforeClosingFile() {
+        val folder = Files.createTempDirectory("close-tail").toFile()
+        val target = SessionLogFile(folder.resolve("diplay.log"))
+        try {
+            target.reset("session")
+            AsyncDiagnosticLog.append(target, "last event")
+            AsyncDiagnosticLog.close(target)
+            assertTrue(AsyncDiagnosticLog.awaitIdle(2000))
+            assertTrue(target.file.readText().contains("last event"))
+            target.append("late event")
+            assertFalse(target.file.readText().contains("late event"))
+        } finally { target.close(); folder.deleteRecursively() }
+    }
+    @Test fun legacyWriterAlsoRetainsIndependentJourneyArchives() {
+        val folder = Files.createTempDirectory("journeys").toFile()
+        try {
+            SessionLogFile(folder.resolve("diplay.log")).use { it.reset("outbound"); it.append("outbound original") }
+            SessionLogFile(folder.resolve("diplay.log")).use { it.reset("return"); it.append("return original") }
+            val archived = folder.resolve("archive").walkTopDown().filter { it.extension == "log" }.map { it.readText() }.toList()
+            assertEquals(2, archived.size)
+            assertTrue(archived.any { it.contains("outbound original") })
+            assertTrue(archived.any { it.contains("return original") })
+        } finally { folder.deleteRecursively() }
+    }
     @Test fun queuedEvidenceRetainsNetworkAddressAndTimestampBeforeUsingItsCapturedFileTarget() {
         val folder = Files.createTempDirectory("diplay-async-log").toFile()
         val old = SessionLogFile(folder.resolve("old.log"))

@@ -18,14 +18,19 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [27])
 class HotspotNetworkDiagnosticsTest {
+    private fun exportedText(activity: DiPlayActivity, context: Context): String {
+        val file = activity.javaClass.getDeclaredMethod("diagnosticReportFile", Context::class.java, String::class.java)
+            .apply { isAccessible = true }.invoke(activity, context, "all") as File
+        return try { java.util.zip.ZipFile(file).use { zip -> zip.entries().asSequence().joinToString("\n") { zip.getInputStream(it).bufferedReader().use { input -> input.readText() } } } }
+        finally { file.delete() }
+    }
     @Test fun savedHotspotSnapshotSurvivesUntilDiagnosticExport() {
         val context = RuntimeEnvironment.getApplication()
         val folder = File(context.filesDir, "hotspot-network-diagnostics").apply { mkdirs() }
         try {
             File(folder, "latest.txt").writeText("captureMarker=hotspot-snapshot\npassword=not-for-export\n")
             val activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
-            val report = activity.javaClass.getDeclaredMethod("diagnosticReportText", Context::class.java)
-                .apply { isAccessible = true }.invoke(activity, context) as String
+            val report = exportedText(activity, context)
             assertTrue("Saved network evidence must be in the exported diagnostic report", report.contains("captureMarker=hotspot-snapshot"))
             assertTrue(report.contains("password=not-for-export"))
         } finally { folder.deleteRecursively() }
@@ -270,8 +275,7 @@ class HotspotNetworkDiagnosticsTest {
             assertEquals(HotspotNetworkDiagnostics.Outcome.SAVED, HotspotNetworkDiagnostics.collect(context, probe))
             val saved = File(folder, "latest.txt").readText()
             val activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
-            val report = activity.javaClass.getDeclaredMethod("diagnosticReportText", Context::class.java)
-                .apply { isAccessible = true }.invoke(activity, context) as String
+            val report = exportedText(activity, context)
             for (line in lines) {
                 assertTrue("Missing stored line: $line", saved.contains(line))
                 assertTrue("Missing exported line: $line", report.contains(line))
@@ -282,8 +286,7 @@ class HotspotNetworkDiagnosticsTest {
     @Test fun diagnosticReportIdentifiesBuildAndGenerationTime() {
         val context = RuntimeEnvironment.getApplication()
         val activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
-        val report = activity.javaClass.getDeclaredMethod("diagnosticReportText", Context::class.java)
-            .apply { isAccessible = true }.invoke(activity, context) as String
+        val report = exportedText(activity, context)
         assertTrue(report.contains("versionCode="))
         assertTrue(report.contains("sourceRevision="))
         assertTrue(report.contains("reportGeneratedAt="))

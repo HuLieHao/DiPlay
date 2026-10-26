@@ -28,6 +28,24 @@ class SettingsReportFileServerTest {
         assertFalse("temporary report survives completed transfer", file.exists())
     }
 
+    @Test fun validatesRangeBeforeGeneratingSelectedArchive() {
+        val directory = Files.createTempDirectory("selected-report").toFile()
+        val selected = mutableListOf<String>()
+        val server = SettingsBackupServer(page = byteArrayOf(), export = { byteArrayOf() },
+            import = { SettingsImportOutcome(0, 0, invalid = false) },
+            archiveReport = { range -> selected.add(range); directory.resolve("bundle.zip").apply { writeText("zip") } })
+        val endpoint = server.start()!!
+        try {
+            val invalid = request(endpoint, "/b/${endpoint.token}/report?selection=../secret")
+            assertEquals(400, invalid.responseCode); invalid.disconnect()
+            assertTrue(selected.isEmpty())
+            val valid = request(endpoint, "/b/${endpoint.token}/report?selection=yesterday")
+            assertEquals(200, valid.responseCode)
+            assertEquals("application/zip", valid.contentType)
+            valid.inputStream.use { it.readBytes() }; valid.disconnect()
+            assertEquals(listOf("yesterday"), selected)
+        } finally { server.stop(); directory.deleteRecursively() }
+    }
     @Test fun streamsWholeUtf8FileWithLengthAndDeletesOnlyItsSnapshot() {
         val directory = Files.createTempDirectory("report-file-test").toFile()
         val file = directory.resolve("BuickPlay-code47-trip-abc.txt")

@@ -5,6 +5,13 @@ import org.junit.Test
 import java.nio.file.Files
 
 class DiagnosticRedactorTest {
+    @Test fun detailedOriginalLinesKeepMoreThanLegacyMirrorAndDiscloseOversizeTruncation() {
+        val original = "original=" + "x".repeat(1000)
+        assertEquals(original, DiagnosticRedactor.original(original))
+        val clipped = DiagnosticRedactor.original("x".repeat(100_000))
+        assertTrue(clipped.length <= 64 * 1024)
+        assertTrue(clipped.contains("truncated"))
+    }
     @Test fun troubleshootingMetadataAndPayloadTextSurviveSavedReport() {
         val lines = listOf(
             "wireless startup elapsedMs=10000 authenticated=true wifiConfigs=2 startRequests=1 tcpAccepted=0 sessionActive=false waitingFor=WiFi_discovery_or_AirPlay_TCP startRequestAgeMs=9000 firstTcpAfterStartMs=none",
@@ -95,7 +102,7 @@ class DiagnosticRedactorTest {
             assertTrue(folder.resolve("diplay.log").length() <= SessionLogFile.MAX_BYTES + 701)
             assertTrue(folder.resolve("previous.log").length() <= SessionLogFile.MAX_BYTES + 701)
             assertTrue(folder.resolve("diplay.log").readText().contains("CarPlay connected"))
-            assertTrue(folder.listFiles()!!.any { it.readText().contains("secret") })
+            assertTrue(folder.listFiles()!!.filter { it.isFile }.any { it.readText().contains("secret") })
         } finally { folder.deleteRecursively() }
     }
     @Test fun failuresSurviveLaterSuccessfulSessionsAndOldestHistoryExpires() {
@@ -109,7 +116,7 @@ class DiagnosticRedactorTest {
                 }
             }
             val history = SessionLogFile.REPORT_NAMES.map { folder.resolve(it).readText() }
-            assertEquals(8, folder.listFiles()!!.size)
+            assertEquals(8, folder.listFiles()!!.count { it.isFile })
             assertTrue(history.first().contains("session=2"))
             assertTrue(history.last().contains("session=9"))
             assertTrue(history.any { it.contains("rejected code=0") })

@@ -342,7 +342,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         refreshCarButton()
         carButtonSaved()
     }
-    private val export = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+    private val export = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) exportDiagnostics(uri)
     }
     // Android 9: storage access puts the report in the visible Downloads/DiPlay folder.
@@ -2546,7 +2546,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 page = backupPageHtml(),
                 export = { SettingsBackupCodec.export(this, version()) },
                 import = { SettingsBackupCodec.import(this, it) },
-                reportFile = { diagnosticReportFile(applicationContext) },
+                archiveReport = { selection -> diagnosticReportFile(applicationContext, selection) },
+                archiveSessions = { DiagnosticArchive.forLogs(File(applicationContext.filesDir, "logs")).sessions().joinToString("\n") { (id, description) -> "$id\t$description" } },
                 codePage = assets.open("settings-code.html").use { it.readBytes() },
             )
             created.onCodeEntryClosed = {
@@ -5906,9 +5907,29 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }, "buickplay-hotspot-diagnostics").start()
     }
 
-    private fun reportFileName() = "DiPlay-${SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())}.txt"
+    private fun reportFileName() = "DiPlay-${SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())}.zip"
 
-    private fun saveReportToDownloads() {
+    private var diagnosticSelection = "all"
+
+    private fun chooseDiagnosticSelection(action: () -> Unit) {
+        val ranges = listOf("today", "yesterday", "7days", "all")
+        val labels = arrayOf(getString(R.string.settings_archive_today), getString(R.string.settings_archive_yesterday), getString(R.string.settings_archive_week), getString(R.string.settings_archive_all), getString(R.string.settings_archive_session))
+        appDialogBuilder().setTitle(getString(R.string.save_diagnostic_report)).setItems(labels) { _, index ->
+            if (index < ranges.size) { diagnosticSelection = ranges[index]; action() }
+            else {
+                Thread({
+                val sessions = DiagnosticArchive.forLogs(File(filesDir, "logs")).sessions()
+                runOnUiThread { if (!isFinishing && !isDestroyed) appDialogBuilder().setTitle(getString(R.string.settings_archive_session))
+                    .setItems(sessions.map { it.second }.toTypedArray()) { _, selected -> diagnosticSelection = sessions[selected].first; action() }
+                    .setNegativeButton(getString(R.string.close), null).show() }
+                }, "diagnostic-sessions").start()
+            }
+        }.setNegativeButton(getString(R.string.close), null).show()
+    }
+
+    private fun saveReportToDownloads() = chooseDiagnosticSelection { saveSelectedReportToDownloads() }
+
+    private fun saveSelectedReportToDownloads() {
         if (exportInProgress) return
         if (DiagnosticExportStore.needsStoragePermission(this)) {
             runCatching { reportStoragePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE) }
@@ -5916,7 +5937,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         } else exportDiagnostics()
     }
 
-    private fun chooseReportDestination() {
+    private fun chooseReportDestination() = chooseDiagnosticSelection { chooseSelectedReportDestination() }
+
+    private fun chooseSelectedReportDestination() {
         // Some head units omit or disable DocumentsUI. Launch itself can throw, before
         // the result callback and the background writer's exception handler ever run.
         if (exportInProgress) return
@@ -5931,12 +5954,17 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         val fileName = reportFileName()
         Thread({
             val result = runCatching {
-                val report = diagnosticReportText(appContext)
+                val snapshot = diagnosticReportFile(appContext, diagnosticSelection)
+                try {
+                val report = java.util.zip.ZipFile(snapshot).use { zip ->
+                    getString(R.string.settings_archive_preview) + "\n" + zip.getInputStream(zip.getEntry("diagnostics.txt")).use { it.readTextBounded(64 * 1024) } + "\n" + zip.getInputStream(zip.getEntry("manifest.txt")).use { it.readTextBounded(32 * 1024) }
+                }
                 val savedReport = if (uri != null) {
-                    DiagnosticExportStore.write(appContext.contentResolver, uri, report)
+                    DiagnosticExportStore.write(appContext.contentResolver, uri, snapshot)
                     DiagnosticExportStore.SavedReport(uri)
-                } else DiagnosticExportStore.saveWithoutPicker(appContext, fileName, report)
+                } else DiagnosticExportStore.saveWithoutPicker(appContext, fileName, snapshot)
                 savedReport to report
+                } finally { snapshot.delete() }
             }
             runOnUiThread {
                 exportInProgress = false
@@ -5956,7 +5984,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                         .setNeutralButton(getString(R.string.share)) { _, _ ->
                             runCatching {
                                 startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"; putExtra(Intent.EXTRA_STREAM, savedReport.uri)
+                                    type = "application/zip"; putExtra(Intent.EXTRA_STREAM, savedReport.uri)
                                     clipData = android.content.ClipData.newRawUri(getString(R.string.report_clip_label), savedReport.uri)
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                 }, getString(R.string.share_diagnostic_report)))
@@ -5972,25 +6000,32 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }, "diplay-export").start()
     }
 
-    /** The text of a diagnostic report. It reads the session logs, so call it off the main thread. */
-    private fun diagnosticReportText(appContext: Context): String = buildString {
-        writeDiagnosticReport(appContext, this)
+    private fun java.io.InputStream.readTextBounded(limit: Int): String {
+        val buffer = ByteArray(limit)
+        var count = 0
+        while (count < limit) { val read = read(buffer, count, limit - count); if (read < 0) break; count += read }
+        return String(buffer, 0, count, Charsets.UTF_8)
     }
 
-    private fun diagnosticReportFile(appContext: Context): File {
+    private fun diagnosticReportFile(appContext: Context, selection: String = "all"): File {
         val info = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
         val code = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info)
-        return DiagnosticReportFile.create(File(appContext.cacheDir, "phone-reports"), code) {
-            writeDiagnosticReport(appContext, it)
+        val directory = File(appContext.cacheDir, "archive-reports")
+        val file = DiagnosticArchive.newExportFile(directory, code)
+        val flushed = AsyncDiagnosticLog.awaitIdle(2_000)
+        val metadata = buildString {
+            appendLine("Archive queue flush=$flushed; false means pending tail may be absent. ${AsyncDiagnosticLog.status()}")
+            writeDiagnosticReport(appContext, this, includeOriginalLogs = false)
         }
+        return DiagnosticArchive.forLogs(File(appContext.filesDir, "logs")).export(file, selection, metadata)
     }
 
     /** Both export paths share the same content; the phone path never builds the whole report in memory. */
-    private fun writeDiagnosticReport(appContext: Context, output: Appendable) = with(output) {
+    private fun writeDiagnosticReport(appContext: Context, output: Appendable, includeOriginalLogs: Boolean = true) = with(output) {
         val pendingFlushed = AsyncDiagnosticLog.awaitIdle(2_000)
         appendLine("BuickPlay ${version()} · private beta diagnostic report")
         appendLine("Diagnostic writer flush: ${if (pendingFlushed) "completed" else "timed_out; pending tail may be missing"}")
-        appendLine("Export consistency: live files; concurrent log rotation may affect this snapshot")
+        appendLine("Export consistency: archive ZIP uses pinned fixed byte prefixes; diagnostics describe live state")
         appendLine(DiagnosticBuildInfo.report(appContext))
         appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
         appendLine("Head unit: ${Build.MANUFACTURER} ${Build.MODEL}")
@@ -6071,8 +6106,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine("--- Last crash recorded by DiPlay ---")
         appendLine(CrashRecord.report(appContext))
         appendLine()
-        appendLine(HotspotNetworkDiagnostics.report(appContext))
-        for (name in SessionLogFile.REPORT_NAMES) {
+        if (includeOriginalLogs) appendLine(HotspotNetworkDiagnostics.report(appContext))
+        if (includeOriginalLogs) for (name in SessionLogFile.REPORT_NAMES) {
             val file = File(appContext.filesDir, "logs/$name")
             if (file.isFile) {
                 appendLine("--- $name ---")

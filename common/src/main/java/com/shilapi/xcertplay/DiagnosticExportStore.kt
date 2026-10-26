@@ -26,6 +26,18 @@ internal object DiagnosticExportStore {
         val savedPath: String? = null,
     )
 
+    private class Source(val open: () -> java.io.InputStream, val length: Long)
+    private fun source(report: String) = Source({ report.byteInputStream(Charsets.UTF_8) }, report.toByteArray(Charsets.UTF_8).size.toLong())
+    private fun source(report: File) = Source({ report.inputStream() }, report.length())
+
+    fun saveWithoutPicker(context: Context, fileName: String, report: String) = saveWithoutPicker(context, fileName, source(report))
+    fun saveWithoutPicker(context: Context, fileName: String, report: File) = saveWithoutPicker(context, fileName, source(report))
+    fun saveToDownloads(resolver: ContentResolver, fileName: String, report: String) = saveToDownloads(resolver, fileName, source(report))
+    fun saveToDownloads(resolver: ContentResolver, fileName: String, report: File) = saveToDownloads(resolver, fileName, source(report))
+    internal fun saveToPublicDownloads(context: Context, fileName: String, report: String) = saveToPublicDownloads(context, fileName, source(report))
+    fun write(resolver: ContentResolver, uri: Uri, report: String) = write(resolver, uri, source(report))
+    fun write(resolver: ContentResolver, uri: Uri, report: File) = write(resolver, uri, source(report))
+
     /**
      * Saves to the visible Downloads/DiPlay folder whenever the head unit allows it, so the
      * report can be reached from a file manager or USB. Order:
@@ -36,7 +48,7 @@ internal object DiagnosticExportStore {
      *  3. App-specific external storage (Android/data/<package>, hidden on many head units).
      *  4. Internal app storage, shared through the report viewer.
      */
-    fun saveWithoutPicker(context: Context, fileName: String, report: String): SavedReport {
+    private fun saveWithoutPicker(context: Context, fileName: String, report: Source): SavedReport {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 return SavedReport(saveToDownloads(context.contentResolver, fileName, report))
@@ -69,14 +81,15 @@ internal object DiagnosticExportStore {
         context: Context,
         directory: File,
         fileName: String,
-        report: String,
+        report: Source,
         savedInApp: Boolean = false,
     ): SavedReport {
         if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Report storage is unavailable")
         // Each export has a new URI: an earlier share grant cannot read a later report.
-        val file = File.createTempFile(fileName.removeSuffix(".txt") + "-", ".txt", directory)
+        val suffix = if (fileName.endsWith(".zip")) ".zip" else ".txt"
+        val file = File.createTempFile(fileName.removeSuffix(suffix) + "-", suffix, directory)
         try {
-            file.writeText(report, Charsets.UTF_8)
+            report.open().use { input -> file.outputStream().use { output -> input.copyTo(output, 32 * 1024) } }
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.diagnostic-reports", file)
             // Retain only the newest eight reports; never prune the export being returned.
             directory.listFiles()?.filter { it != file && it.isFile }
@@ -104,23 +117,24 @@ internal object DiagnosticExportStore {
     fun publicDownloadsDirectory(): File =
         File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "DiPlay")
 
-    internal fun saveToPublicDownloads(context: Context, fileName: String, report: String): SavedReport {
+    private fun saveToPublicDownloads(context: Context, fileName: String, report: Source): SavedReport {
         val directory = publicDownloadsDirectory()
         if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Downloads/DiPlay is unavailable")
-        val base = fileName.removeSuffix(".txt")
+        val suffix = if (fileName.endsWith(".zip")) ".zip" else ".txt"
+        val base = fileName.removeSuffix(suffix)
         var file = File(directory, fileName)
         var copy = 1
-        while (file.exists()) file = File(directory, "$base-${copy++}.txt")
+        while (file.exists()) file = File(directory, "$base-${copy++}$suffix")
         try {
-            file.writeText(report, Charsets.UTF_8)
-            if (file.length() == 0L && report.isNotEmpty()) throw IOException("Downloads/DiPlay did not keep the report")
+            report.open().use { input -> file.outputStream().use { output -> input.copyTo(output, 32 * 1024) } }
+            if (file.length() == 0L && report.length > 0) throw IOException("Downloads/DiPlay did not keep the report")
         } catch (error: Exception) {
             file.delete()
             throw error
         }
         // The report is saved; nothing below may undo that. The user's Downloads folder is never pruned.
         runCatching {
-            MediaScannerConnection.scanFile(context.applicationContext, arrayOf(file.absolutePath), arrayOf("text/plain"), null)
+            MediaScannerConnection.scanFile(context.applicationContext, arrayOf(file.absolutePath), arrayOf(if (fileName.endsWith(".zip")) "application/zip" else "text/plain"), null)
         }
         val uri = try {
             FileProvider.getUriForFile(context, "${context.packageName}.diagnostic-reports", file)
@@ -133,7 +147,7 @@ internal object DiagnosticExportStore {
         return SavedReport(uri, savedPath = file.absolutePath)
     }
 
-    private fun privateShareCopy(context: Context, fileName: String, report: String): Uri {
+    private fun privateShareCopy(context: Context, fileName: String, report: Source): Uri {
         val external = runCatching { context.getExternalFilesDir(null) }.getOrNull()
         if (external != null) {
             runCatching { return saveInDirectory(context, File(external, "diagnostic-reports"), fileName, report).uri }
@@ -142,10 +156,10 @@ internal object DiagnosticExportStore {
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    fun saveToDownloads(resolver: ContentResolver, fileName: String, report: String): Uri {
+    private fun saveToDownloads(resolver: ContentResolver, fileName: String, report: Source): Uri {
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-            put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+            put(MediaStore.Downloads.MIME_TYPE, if (fileName.endsWith(".zip")) "application/zip" else "text/plain")
             put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/DiPlay")
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
@@ -165,9 +179,9 @@ internal object DiagnosticExportStore {
         }
     }
 
-    fun write(resolver: ContentResolver, uri: Uri, report: String) {
+    private fun write(resolver: ContentResolver, uri: Uri, report: Source) {
         val stream = resolver.openOutputStream(uri, "wt")
             ?: throw IOException("Report destination is unavailable")
-        stream.bufferedWriter(Charsets.UTF_8).use { it.write(report) }
+        stream.use { output -> report.open().use { input -> input.copyTo(output, 32 * 1024) } }
     }
 }

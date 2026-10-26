@@ -36,11 +36,11 @@ class DiagnosticExportUiTest {
                 throw ActivityNotFoundException("No DocumentsUI")
             }
             override fun unregister() = Unit
-            override fun getContract() = androidx.activity.result.contract.ActivityResultContracts.CreateDocument("text/plain")
+            override fun getContract() = androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip")
         }
         ReflectionHelpers.setField(activity, "export", missingPicker)
         try {
-            ReflectionHelpers.callInstanceMethod<Unit>(activity, "chooseReportDestination")
+            ReflectionHelpers.callInstanceMethod<Unit>(activity, "chooseSelectedReportDestination")
             val deadline = System.nanoTime() + 5_000_000_000L
             while (ShadowAlertDialog.getLatestAlertDialog() == null && System.nanoTime() < deadline) {
                 Thread.sleep(20)
@@ -49,10 +49,10 @@ class DiagnosticExportUiTest {
             val saved = requireNotNull(ShadowAlertDialog.getLatestAlertDialog())
             val reports = File(context.getExternalFilesDir(null)!!, "diagnostic-reports")
             val file = reports.listFiles()!!.single()
-            assertTrue(file.name.endsWith(".txt"))
+            assertTrue(file.name.endsWith(".zip"))
             assertTrue(descendants(saved.window!!.decorView).filterIsInstance<TextView>()
                 .any { it.text.contains(file.absolutePath) })
-            assertTrue(file.readText().contains("Android 9 / API 28"))
+            java.util.zip.ZipFile(file).use { zip -> assertTrue(zip.getInputStream(zip.getEntry("diagnostics.txt")).bufferedReader().readText().contains("Android 9 / API 28")) }
             saved.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
             shadowOf(Looper.getMainLooper()).idle()
             val viewer = ShadowAlertDialog.getLatestAlertDialog()

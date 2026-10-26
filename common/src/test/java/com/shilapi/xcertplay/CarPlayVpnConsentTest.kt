@@ -150,7 +150,7 @@ class CarPlayVpnConsentTest {
     }
 
     private fun field(name: String): Boolean = ReflectionHelpers.getField(activity, name)
-    private fun log() = File(activity.filesDir, "logs/diplay.log").readText()
+    private fun log(): String { assertTrue(AsyncDiagnosticLog.awaitIdle(2000)); return File(activity.filesDir, "logs/diplay.log").readText() }
     private fun invoke(name: String) {
         try { activity.javaClass.getDeclaredMethod(name).apply { isAccessible = true }.invoke(activity) }
         catch (error: InvocationTargetException) { throw error.targetException }

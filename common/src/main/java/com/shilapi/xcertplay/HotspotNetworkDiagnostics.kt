@@ -66,7 +66,9 @@ internal object HotspotNetworkDiagnostics {
             Thread(task, "hotspot-diagnostic-deadline").apply { isDaemon = true }
         }
         val started = SystemClock.elapsedRealtime()
-        val captureId = "${System.currentTimeMillis()}-$started"
+        val captureId = java.util.UUID.randomUUID().toString()
+        val archive = DiagnosticArchive.forLogs(File(context.filesDir, "logs"))
+        val correlation = archive.correlation()
         val text = StringBuilder()
         fun event(message: String) { Log.i("BuickPlayNetworkDiag", "captureId=$captureId $message") }
         fun section(title: String, raw: String, metadata: String = "") {
@@ -86,7 +88,7 @@ internal object HotspotNetworkDiagnostics {
         }
         return try {
             event("capture_started")
-            section("capture", "captureId=$captureId captureStartedAt=${DiagnosticBuildInfo.timestamp()} capturedAtEpochMs=${System.currentTimeMillis()} elapsedRealtimeMs=$started\n" +
+            section("capture", "captureId=$captureId $correlation captureStartedAt=${DiagnosticBuildInfo.timestamp()} capturedAtEpochMs=${System.currentTimeMillis()} elapsedRealtimeMs=$started\n" +
                 DiagnosticBuildInfo.report(context) +
                 "Android API=${Build.VERSION.SDK_INT} board=${Build.BOARD} hardware=${Build.HARDWARE}\n" +
                 "sessionActive=${CarPlayBackgroundSession.active} sessionPresent=${CarPlayBackgroundSession.hasSession()}\n" +
@@ -155,6 +157,7 @@ internal object HotspotNetworkDiagnostics {
                 "Config/lease probes use known candidate paths only; unavailable files, permissions or tools do not prove absent capability.\n" +
                 "Compare captures while connecting and running. Record iPhone internet tests separately. Original identifiers are retained.")
             save(context, text.toString())
+            archive.capture(text.toString(), captureId, correlation.substringAfter("session=").substringBefore(" "))
             event("capture_saved durationMs=${SystemClock.elapsedRealtime() - started}")
             Outcome.SAVED
         } catch (error: Exception) {

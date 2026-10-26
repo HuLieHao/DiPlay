@@ -32,6 +32,16 @@ class DiagnosticExportStoreTest {
         ShadowContentResolver.registerProviderInternal("media", provider)
     }
 
+    @Test fun zipFileIsStreamedToDownloadsWithoutTextConversion() {
+        val file = File.createTempFile("report", ".zip")
+        try {
+            val bytes = ByteArray(512 * 1024) { (it % 251).toByte() }
+            file.writeBytes(bytes)
+            DiagnosticExportStore.saveToDownloads(resolver, "report.zip", file)
+            assertArrayEquals(bytes, provider.file.readBytes())
+            assertEquals("application/zip", provider.insertValues!!.getAsString(MediaStore.Downloads.MIME_TYPE))
+        } finally { file.delete() }
+    }
     @Test fun android10SavesUtf8ReportToDownloadsAndPublishesAfterClosingIt() {
         val report = "DiPlay · diagnostic report\nVideo: H.264\n"
         val uri = DiagnosticExportStore.saveToDownloads(resolver, "DiPlay-test.txt", report)

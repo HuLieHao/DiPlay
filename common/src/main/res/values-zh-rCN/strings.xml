@@ -986,4 +986,10 @@
     <string name="cluster_projection_shape_description">半屏会在仪表盘地图旁保留仪表原本的车速与状态信息；全屏则让地图占满整个仪表盘。CarPlay 地图出现时 DiPlay 会设置该形态，否则会覆盖你在车机上选好的导航模式。需要车机已授权网络 ADB。</string>
     <string name="settings_cluster_speedometer_album_color">速度表背景使用专辑颜色</string>
     <string name="settings_cluster_speedometer_album_color_description">平滑过渡到专辑边框的颜色，并保留所选的不透明度。</string>
+    <string name="settings_archive_today">今天</string>
+    <string name="settings_archive_yesterday">昨天</string>
+    <string name="settings_archive_week">最近7天</string>
+    <string name="settings_archive_all">所有保留的会话</string>
+    <string name="settings_archive_session">选择会话（设备日期可能不准确）</string>
+    <string name="settings_archive_preview">预览最多96 KiB。ZIP包含原始日志、摘要、异常、网络快照及清单。</string>
 </resources>

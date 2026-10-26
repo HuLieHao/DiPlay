@@ -8,7 +8,8 @@ import java.io.OutputStream
 internal object FileReportResponse {
     fun write(input: InputStream, output: OutputStream, length: Long, name: String, onHeadersStarted: () -> Unit) {
         val filename = name.takeIf { it.matches(Regex("[A-Za-z0-9._-]{1,160}")) } ?: "BuickPlay-report.txt"
-        val headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n" +
+        val mime = if (filename.endsWith(".zip")) "application/zip" else "text/plain; charset=utf-8"
+        val headers = "HTTP/1.1 200 OK\r\nContent-Type: $mime\r\n" +
             "Content-Disposition: attachment; filename=\"$filename\"\r\n" +
             "Content-Length: $length\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
         require(length >= 0)

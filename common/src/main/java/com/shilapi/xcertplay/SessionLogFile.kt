@@ -7,9 +7,12 @@ import java.io.File
 internal class SessionLogFile(val file: File) : Closeable {
     private val lock = Any()
     private var closed = false
+    private val archive = DiagnosticArchive.forLogs(file.parentFile!!)
+    private var session: String? = null
     fun reset(header: String) = synchronized(lock) {
         if (!closed) {
             file.parentFile?.mkdirs()
+            session = archive.start(header)
             rotate()
             file.writeText("")
             append(header)
@@ -17,13 +20,16 @@ internal class SessionLogFile(val file: File) : Closeable {
     }
     fun append(line: String) = synchronized(lock) {
         if (closed) return@synchronized
-        val safe = DiagnosticRedactor.redact(line) ?: return@synchronized
+        val safe = DiagnosticRedactor.original(line)
         runCatching {
+            val id = session ?: archive.start("append_without_reset").also { session = it }
+            runCatching { archive.append(id, safe) }
             if (file.length() > MAX_BYTES) {
                 rotate()
                 file.writeText("")
             }
-            file.appendText(safe + "\n")
+            val mirror = if (safe.length <= 700) safe else safe.take(655) + " [truncated legacy mirror; see session archive]"
+            file.appendText(mirror + "\n")
         }
         Unit
     }
@@ -36,7 +42,10 @@ internal class SessionLogFile(val file: File) : Closeable {
         }
         file.copyTo(File(file.parentFile, ARCHIVE_NAMES.first()), overwrite = true)
     }
-    override fun close() = synchronized(lock) { closed = true }
+    override fun close() = synchronized(lock) {
+        if (!closed) session?.let { archive.append(it, "session_closed reason=writer_closed") }
+        closed = true
+    }
     companion object {
         const val MAX_BYTES = 512 * 1024L
         private val ARCHIVE_NAMES = listOf("previous.log") + (2..7).map { "previous-$it.log" }

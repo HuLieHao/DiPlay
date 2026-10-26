@@ -45,6 +45,8 @@ class SettingsBackupServer(
     private val codePage: ByteArray? = null,
     /** Creates a unique immutable snapshot; this server owns and deletes it after the transfer. */
     private val reportFile: (() -> File)? = null,
+    private val archiveReport: ((String) -> File)? = null,
+    private val archiveSessions: (() -> String)? = null,
 ) {
     private var server: ServerSocket? = null
     private var thread: Thread? = null
@@ -165,9 +167,17 @@ class SettingsBackupServer(
                 it.soTimeout = 10_000
                 it.tcpNoDelay = true
                 val request = readRequest(it.getInputStream()) ?: return
-                if (reportFile != null && request.method == "GET" &&
+                if ((reportFile != null || archiveReport != null) && request.method == "GET" &&
                     request.path.substringBefore('?').trimEnd('/') == "/b/$token/report") {
                     serveReportFile(it, request)
+                    return
+                }
+                if (archiveSessions != null && request.method == "GET" && request.path == "/b/$token/sessions") {
+                    val body = archiveSessions.invoke().toByteArray(Charsets.UTF_8)
+                    it.getOutputStream().apply {
+                        write("HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${body.size}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".toByteArray())
+                        write(body); flush()
+                    }
                     return
                 }
                 // A failure while preparing the answer is told to the browser; without an answer it
@@ -205,6 +215,14 @@ class SettingsBackupServer(
                 flush()
             }
         }
+        val query = request.path.substringAfter('?', "")
+        val selection = if (query.isEmpty()) "all" else query.removePrefix("selection=")
+        if (query.isNotEmpty() && !query.startsWith("selection=") ||
+            !(selection in setOf("today", "yesterday", "7days", "all") ||
+                selection.matches(Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")))) {
+            error(400, "Invalid selection. Choose today, yesterday, 7days, all, or a retained session ID.")
+            return
+        }
         if (!reportInFlight.compareAndSet(false, true)) {
             error(503, "A report is already being prepared or downloaded. Try again after it finishes.")
             return
@@ -212,7 +230,7 @@ class SettingsBackupServer(
         var file: File? = null
         var headersStarted = false
         try {
-            val snapshot = checkNotNull(reportFile).invoke()
+            val snapshot = archiveReport?.invoke(selection) ?: checkNotNull(reportFile).invoke()
             file = snapshot
             check(snapshot.isFile) { "Report snapshot is not a file" }
             if (closed || socket.isClosed) return

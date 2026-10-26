@@ -926,4 +926,10 @@
     <string name="cluster_projection_shape_description">La pantalla partida mantiene junto al mapa la velocidad y el estado que el panel muestra normalmente; la pantalla completa deja que el mapa ocupe todo el panel. DiPlay fija la forma cada vez que aparece el mapa de CarPlay, que de lo contrario anula la forma elegida en el coche. Requiere ADB por red en la unidad principal.</string>
     <string name="settings_cluster_speedometer_album_color">Usar el color del álbum en el fondo del velocímetro</string>
     <string name="settings_cluster_speedometer_album_color_description">Iguala el color del borde del álbum con transiciones suaves. Conserva la opacidad elegida.</string>
+    <string name="settings_archive_today">Hoy</string>
+    <string name="settings_archive_yesterday">Ayer</string>
+    <string name="settings_archive_week">Últimos 7 días</string>
+    <string name="settings_archive_all">Todas las sesiones conservadas</string>
+    <string name="settings_archive_session">Elegir sesión (la fecha puede ser incorrecta)</string>
+    <string name="settings_archive_preview">Vista previa limitada a 96 KiB. El ZIP incluye registros originales, resúmenes, errores, capturas de red y un manifiesto.</string>
 </resources>
