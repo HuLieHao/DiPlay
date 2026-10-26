@@ -70,6 +70,7 @@ internal class CarPlayClockOverlay(
         ellipsize = null
         includeFontPadding = false
         setPadding(0, 0, 0, 0)
+        setBackgroundColor(Color.BLACK)
     }
     fun update(visible: Boolean, night: Boolean) {
         visiblePage = visible
@@ -85,7 +86,7 @@ internal class CarPlayClockOverlay(
         running = visible && position != "off"
         visibility = if (running) View.VISIBLE else View.GONE
         // CarPlay can change its sidebar independently of the host day/night setting.
-        setTextColor(Color.YELLOW)
+        setTextColor(Color.WHITE)
         placeInDock(position)
         if (running && isAttachedToWindow && !registered) {
             context.registerReceiver(timeChanged, IntentFilter().apply {
@@ -127,8 +128,6 @@ internal class CarPlayClockOverlay(
         // No native widget bounds are exposed.
         // Scale with video height, cap the sidebar to the visible width for narrow layouts.
         val scale = contentBounds.height().coerceAtLeast(0f) / 858f
-        // Bright yellow with a dark halo stays distinct from both light and dark sidebars.
-        setShadowLayer(3f * scale, 0f, 0f, Color.BLACK)
         val dockWidth = (118f * scale).coerceAtMost(contentBounds.width().coerceAtLeast(0f))
         val clockHeight = (56f * scale).coerceAtMost(contentBounds.height().coerceAtLeast(0f))
         val top = (contentBounds.bottom - 146f * scale)
