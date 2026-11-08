@@ -1,34 +1,36 @@
 # BuickPlay：后装安卓车机个人定制版
 
-BuickPlay 是基于 [DiPlay](https://github.com/shihabal3amri/DiPlay) 的个人改造项目，用于在后装安卓车机上尝试有线或无线 CarPlay。当前调试版本 **0.2.21-buick.1-debug**，安装版本码 **41**，基于上游 `main` 提交 **143f4674**（2026-10-21），含 0.2.21 发布后的关键修复。
+BuickPlay 是基于 [DiPlay](https://github.com/shihabal3amri/DiPlay) 的个人改造项目，主要针对个人使用的 FF-5000 后装车机优化无线 CarPlay。当前调试版本 **0.2.21-buick.3-debug / code108**；最近收尾正式版为 **0.2.21-buick.2 / code73**。当前上游基线为 **143f4674**（2026-10-21，0.2.21 发布后的修复），不代表已经同步上游最新版本。
 
-**这不是别克凯越原装车机项目。** 当前车辆安装的是第三方后装安卓车机，其硬件和固件与凯越车型没有直接对应关系。BuickPlay 和版本后缀 `buick.1` 表示个人别克主题定制，`kaiyue` 是历史分支名；不代表别克官方产品、原装车机支持或仅限别克车型使用。
+**这不是别克凯越原装车机项目。** 当前车辆安装的是第三方后装安卓车机，其硬件和固件与凯越车型没有直接对应关系。BuickPlay 和版本后缀 `buick.N` 表示个人别克主题定制，`kaiyue` 是历史分支名；不代表别克官方产品、原装车机支持或仅限别克车型使用。
 
 兼容性应按车机的 Android 版本、硬件、固件、蓝牙和 Wi-Fi 能力判断，不能仅按车辆品牌或车型判断。本项目尚未完成通用后装车机的广泛适配验证。
 
-[版本计划与实施记录](docs/RELEASE-PLAN-0.2.21-buick.1.md) · [上游基线](https://github.com/shihabal3amri/DiPlay/commit/143f4674) · [Releases](https://github.com/HuLieHao/DiPlay/releases) · [上游介绍](docs/DIPLAY-UPSTREAM-README.md)
+[当前版本计划](docs/RELEASE-PLAN-0.2.21-buick.3.md) · [code108 验收记录](docs/ACCEPTANCE-0.2.21-buick.3-code108.md) · [上游基线](https://github.com/shihabal3amri/DiPlay/commit/143f4674) · [Releases](https://github.com/HuLieHao/DiPlay/releases) · [上游介绍](docs/DIPLAY-UPSTREAM-README.md)
 
 ## 改造内容
 
 - 应用、iPhone 设备识别、AirPlay 广播和系统下拉通知名称统一为 **BuickPlay**。
 - CarPlay 车辆按钮默认名称为“别克”，图标为个人提供的别克三盾图片。
 - 默认制造商和型号为 BuickPlay；已保存值直接读取，不增加旧名称迁移。
-- 非 BYD 车机在“车载热点”模式下可以找到热点自动化设置入口。实际开启仍取决于本地 ADB、权限和固件支持。
+- FF-5000 预置无线连接、车机热点自动开启、小灯外观和音乐/GIS 音频路由；保留已有手动设置。其他设备的热点自动化取决于权限与固件。
 - 连接等待页显示阶段耗时、重试倒计时、网络详情与握手细分事件，适配横竖屏。
-- 握手事件写入持久日志；触摸延迟按主视频流隔离，过期样本不计入统计。
+- 完整连接事件、iAP2 写出与链路 ACK、音频统计持久保存；支持停止采集后导出 ZIP、手机局域网下载，以及重型音频快照开关。
+- 当前 FF-5000 连接地址固定 IPv4，首次 TCP 等待含有界宽限；认证后缺少手机启动信号也有独立超时保护。
+- 增加音乐积压调速保护、导航重复包过滤与 RTP 时间戳修正；触摸延迟按主视频流隔离。
 - 调试包名保持 `com.shihab.diplay.hudtest`，可覆盖之前的测试包并保留设置。
 
-独立底部时钟尚未实现。比亚迪仪表、HUD、车辆数据等上游功能依赖对应平台，不能据此认为后装车机可用。
+已实现常驻左下角时钟、小灯日夜联动和经 CarPlay 认证时间校准的应用时钟显示。比亚迪仪表、HUD、车辆数据等上游功能依赖对应平台，不能据此认为后装车机可用。
 
 ## 设备与验证状态
 
 | 对象 | 信息 | 状态 |
 |---|---|---|
-| 计划测试的后装车机 | FFKJ FF-5000、AutoChips AC8227L、Android 8.1（API 27）、1024×600 | BuickPlay 待实车验证 |
-| 调试设备 | Redmi M2003J15SC，Android 11 | 历史版本已验证无线 CarPlay、车辆按钮及系统通知名称；本次整合包待连接复测 |
+| 当前目标后装车机 | FFKJ FF-5000、AutoChips AC8227L、Android 8.1（API 27）、1024×600 | code106 已验证无线连接、小灯切换及一次双向通话；code108 新超时路径待实车验收 |
+| 调试设备 | Redmi M2003J15SC，Android 11 | 历史版本已验证无线 CarPlay、车辆按钮及系统通知名称；手机历史测试不能代替当前车机验收 |
 | 其他后装车机 | 硬件、固件和权限因设备而异 | 未验证，不承诺兼容 |
 
-最低 Android 要求为 **7.0（API 24）**，Android 8.0/8.1 满足安装版本要求，但不等于对应固件已实测支持。2026-10-13 完整检查通过：2503 个测试，0 失败、1 跳过，lint 和 APK 构建任务完成。手机测试不能代替后装车机的实际验证。
+最低 Android 要求为 **7.0（API 24）**，Android 8.0/8.1 满足安装版本要求，但不等于对应固件已实测支持。2026-11-08 code108 完整检查通过：3667 个测试，0 失败、0 错误、1 跳过，lint 和 APK 构建任务完成。手机测试不能代替后装车机的实际验证。
 
 ## 当前后装车机系统
 
@@ -47,8 +49,8 @@ BuickPlay 是基于 [DiPlay](https://github.com/shihabal3amri/DiPlay) 的个人�
 | 内核 | Linux `3.18.79`，`armv7l`，构建时间为 2019-10-28 |
 | 安全补丁字段 | `2019-10-05`；这是系统声明值，未审计补丁完整性 |
 | Wi-Fi | 已观察到 2.4GHz 联网；驱动为 `mt-wifi`，固件属性 `ro.wlan.mtk.wifi.5g=0`。准确芯片型号和物理 5GHz 能力未核实 |
-| 蓝牙 | Android 原生蓝牙栈及厂商蓝牙界面均存在；蓝牙版本和 BuickPlay 的实际配对表现待确认 |
-| 原厂固件手机互联 | 已验证固件自带 PhoneLink 的有线 CarPlay；这不等于 BuickPlay 已在该车机验证成功 |
+| 蓝牙 | Android 原生蓝牙栈及厂商蓝牙界面均存在；BuickPlay 已验证配对及无线 CarPlay；旧的已选 iPhone 被系统移除配对后，需重新选择 |
+| 原厂固件手机互联 | 已验证固件自带 PhoneLink 的有线 CarPlay；BuickPlay 的无线链路另有实车验证，两个应用的通道与权限不可直接等同 |
 
 系统满足 BuickPlay 的最低安装版本要求。实车调试应重点验证 32 位运行、视频解码、音频、蓝牙配对、热点和 ACC 恢复。约 1GB 内存也需要观察与车机后台应用同时运行时的稳定性；自启动和热点自动化能否工作仍取决于固件权限。当前没有充分证据确认 MCU 的准确型号或版本，不按“同为 8227L”推断其他固件可以互换。
 
@@ -58,7 +60,7 @@ BuickPlay 是基于 [DiPlay](https://github.com/shihabal3amri/DiPlay) 的个人�
 
 1. 安装适合自己设备的 APK。覆盖之前的测试版时，需要相同包名和签名。
 2. 无线连接先开启双方蓝牙并配对，在应用中选择该 iPhone。
-3. 选择连接模式。车载热点模式需填写实际热点信息，并确认热点已开启。
+3. 选择车载热点模式，确认实际热点信息和开启状态。本地独立调试包可通过外部资产预置目标车机热点；普通源码包不含个人凭据。
 4. 先验证基础连接、声音和画面，再调整分辨率或开启固件相关选项。
 5. iPhone 车辆列表若仍缓存旧名称，先重连；仍未更新时，在 iPhone 的 CarPlay 设置中忽略旧车辆，再重新配对。
 
@@ -70,9 +72,9 @@ BuickPlay 是基于 [DiPlay](https://github.com/shihabal3amri/DiPlay) 的个人�
 
 | 文件 | 用途 |
 |---|---|
-| `BuickPlay-0.2.18-buick.1-source-debug.apk` | 无认证材料的源码调试包，不能直接复现当前本地软件认证连接 |
-| `BuickPlay-0.2.18-buick.1-debug.apk` | 本地自用独立包，显式注入外部认证材料；目前未公开上传 |
-| `BuickPlay-0.2.18-buick.1-source.zip` | 版本标签对应源码，不含认证私钥 |
+| `BuickPlay-0.2.21-buick.3-debug-code108.apk` | 当前本地独立调试包，供个人车机验收；不代表已上传 Release |
+| 普通 `assembleDebug` 输出 | 不含本地认证身份的源码构建包 |
+| `BuickPlay-0.2.21-buick.2` / code73 | 最近收尾正式版，附件是否存在以 Releases 为准 |
 
 文件是否可下载，以 Releases 中实际提供的附件为准。公开分发前需单独确认车标和认证材料的权利，开源代码许可证不自动授予这些资产的分发权。
 
@@ -88,7 +90,7 @@ BuickPlay 是基于 [DiPlay](https://github.com/shihabal3amri/DiPlay) 的个人�
 DIPLAY_AUTH_ASSETS_DIR=/path/to/local-runtime-assets ./gradlew :mobile:assembleStandaloneDebug
 ```
 
-外部目录需要 `offline-mfi/identity.pk8` 和 `offline-mfi/certificate.p7b`，不要提交到 Git。详见 [构建说明](docs/BUILD.md)。板载 MFi 认证仍是 [待实车验证的候选方案](KAIYUE-I2C-MFI-FEASIBILITY.md)。
+外部目录需要 `offline-mfi/identity.pk8` 和 `offline-mfi/certificate.p7b`，不要提交到 Git。详见 [构建说明](docs/BUILD.md)。板载 MFi 已在当前车机观察到认证及连接成功，但仍有认证后缺少手机启动信号的现场记录，尚不能认定其持续稳定性已验收；见 [code108 记录](docs/ACCEPTANCE-0.2.21-buick.3-code108.md)。方案背景见 [I2C 分析](KAIYUE-I2C-MFI-FEASIBILITY.md)。
 
 ## 实车测试与反馈
 
@@ -96,19 +98,19 @@ DIPLAY_AUTH_ASSETS_DIR=/path/to/local-runtime-assets ./gradlew :mobile:assembleS
 
 反馈请提供车机品牌/型号、Android 和完整固件版本、BuickPlay 版本、iPhone/iOS、连接模式、复现步骤与发生时间，并通过应用“诊断”导出报告。分享前检查热点密码等敏感信息。车辆车型只作为使用场景补充，后装车机问题按硬件与固件记录。
 
+## 已知限制与下次验收
+
+- code106 开启 VPN 的现场重连已连续成功，不等于长时间断电后的首次连接已验证，也不能保证任意 VPN 配置都兼容。
+- 音乐仍有卡顿，关闭重型音频快照后也出现过；无线收包空档与序号缺口的根因尚未闭环。
+- 中控旋钮由 MainUI 处理时仍可能每次跳 3；通话中旋钮未能改变实际通话响度。应用内单格反馈不代表厂商旋钮已经接管。
+- 一次双向通话正常不等于历史偶发无声已根治。模式 5 候选未采用，电话旋钮适配尚未交付。
+- 启动、ACC/深睡、倒车恢复和不同固件兼容性仍需逐项实测。
+
 ## 分支维护与版本规则
 
-| 分支 | 用途 |
-|---|---|
-| `main` | 上游镜像，不加入个人定制 |
-| `kaiyue` | 原 0.2.18 定制主线；历史名称，不表示原装凯越车机适配 |
-| `buickplay/0.2.21-debug` | 基于 `main` 143f4674 整合的 0.2.21 定制调试版本 |
+日常开发固定在 **kaiyue**；**main** 用于上游镜像和比较，不加入个人定制。旧的远程调试分支已经整合，停止维护并清理。不默认新建功能分支或 worktree。详见 [个人迭代流程](docs/BRANCH-WORKFLOW.md)。
 
-定制提交使用 `[kaiyue]` 前缀，一主题一提交。同步时评估上游发布标签及其后续关键修复，并固定具体提交。本次选用 `main` 的 `143f4674`，包含 0.2.21 发布后的热点网卡、无线音乐时钟、Bonjour 启动和 Android 8/9 失联检测修复；不随上游后续提交自动漂移。
-
-解决冲突、完成完整检查与目标设备验证后再推送。只需要单个修复时，可评估 cherry-pick。同步记录包含上游版本、冲突和实测结果。
-
-版本格式为 `上游版本-buick.定制迭代号`。当前基线版本为 `0.2.21-buick.1`，本次调试包追加 `-debug`，versionCode 为 41；同基线后续发布可使用 `0.2.21-buick.2`。`buick` 只标记个人主题，每次 APK 发布还应独立递增 Android versionCode。
+版本格式为 `<上游基线>-buick.<定制迭代号>`，调试构建追加 `-debug`。当前目标为 `0.2.21-buick.3`，调试包 code108。相同目标版本通过递增 versionCode 区分交付；正式发布后开始下一轮，再递增定制迭代号。升级上游基线时定制迭代号从 1 开始，versionCode 始终递增，不重置。
 
 ## 来源、许可证与品牌说明
 
