@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="waiting_availability_timeout">نجحت المصادقة، لكن iPhone لم يبدأ CarPlay خلال 30 ثانية</string>
+    <string name="connection_help_availability">افتح قفل iPhone وتحقق من ظهور طلب CarPlay. أعد المحاولة إذا لم يتم الاتصال.</string>
+</resources>

@@ -26,6 +26,53 @@ import org.robolectric.shadows.ShadowAlertDialog
 @Config(sdk = [29])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class NextDriverUiScreenshotsTest {
+    @Test fun captureDiagnosticsAtLargeFonts() {
+        val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup().visible()
+        val activity = controller.get()
+        try {
+            for ((name, width, tag) in listOf(Triple("compact-capture", 320, "zh-CN"), Triple("full-capture", 1000, "zh-CN"), Triple("arabic-capture", 320, "ar-SA"))) {
+                val config = Configuration(activity.resources.configuration).apply {
+                    fontScale = 1.5f; screenWidthDp = width
+                    setLocale(Locale.forLanguageTag(tag)); setLayoutDirection(Locale.forLanguageTag(tag))
+                }
+                @Suppress("DEPRECATION")
+                activity.resources.updateConfiguration(config, activity.resources.displayMetrics)
+                org.robolectric.util.ReflectionHelpers.setField(activity, "settingsSectionFilter", setOf(SettingsSection.DIAGNOSTICS))
+                val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+                method("allSettingsSections", LinearLayout::class.java).invoke(activity, root)
+                assertTrue(views(root).filterIsInstance<android.widget.Button>().any { it.text == activity.getString(R.string.settings_capture_stop) })
+                assertFalse(views(root).filterIsInstance<android.widget.Button>().any { it.text == activity.getString(R.string.settings_hotspot_capture) })
+                capture(root, width, name)
+            }
+        } finally { controller.pause().stop().destroy() }
+    }
+
+    @Test fun boardMfiSettingsRemainReadableAtLargeFonts() {
+        org.robolectric.shadows.ShadowBuild.setModel("FF_5000")
+        val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup().visible()
+        val activity = controller.get()
+        activity.applicationInfo.flags = activity.applicationInfo.flags or android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE
+        AirPlayPersistence.saveMfiTarget(activity, com.shilapi.xcertplay.orchestration.MfiTarget.I2C)
+        try {
+            for ((name, width, tag) in listOf(Triple("compact", 320, "zh-CN"), Triple("full", 1000, "zh-CN"), Triple("arabic", 320, "ar-SA"))) {
+                val config = Configuration(activity.resources.configuration).apply {
+                    fontScale = 1.5f
+                    screenWidthDp = width
+                    setLocale(Locale.forLanguageTag(tag))
+                    setLayoutDirection(Locale.forLanguageTag(tag))
+                }
+                @Suppress("DEPRECATION")
+                activity.resources.updateConfiguration(config, activity.resources.displayMetrics)
+                org.robolectric.util.ReflectionHelpers.setField(activity, "settingsSectionFilter", setOf(SettingsSection.CONNECTION_SETUP))
+                val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+                method("allSettingsSections", LinearLayout::class.java).invoke(activity, root)
+                capture(root, width, "$name-board-mfi")
+                val target = views(root).filterIsInstance<android.widget.Button>().single { it.text.contains(activity.getString(R.string.settings_board_mfi)) }
+                assertTrue("Authentication row must fit its label", target.layout.height <= target.height - target.compoundPaddingTop - target.compoundPaddingBottom)
+            }
+        } finally { controller.pause().stop().destroy() }
+    }
+
     @Test fun clockHomeAndExportRemainUsableAtLargeFonts() {
         val activity = Robolectric.buildActivity(DiPlayActivity::class.java).setup().visible().get()
         activity.setTheme(android.R.style.Theme_Material_NoActionBar)
@@ -41,7 +88,9 @@ class NextDriverUiScreenshotsTest {
             activity.resources.updateConfiguration(config, activity.resources.displayMetrics)
             val clock = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
             method("clockSettings", LinearLayout::class.java).invoke(activity, clock)
-            assertTrue(views(clock).filterIsInstance<TextView>().any { it.text.contains(activity.getString(R.string.settings_clock)) })
+            assertTrue(views(clock).filterIsInstance<TextView>().any { it.text.contains(activity.getString(R.string.settings_clock_size)) })
+            assertEquals("Clock settings should only contain the size choice", 1, views(clock).filterIsInstance<android.widget.Button>().count { it !is android.widget.CompoundButton })
+            assertTrue("Clock settings have no display switch", views(clock).filterIsInstance<android.widget.Switch>().none())
             capture(clock, width, "$name-clock-settings")
             for (label in views(clock).filterIsInstance<android.widget.Button>()) {
                 assertTrue("Clock row clips: ${label.text}", label.layout.height <= label.height - label.compoundPaddingTop - label.compoundPaddingBottom)
@@ -88,7 +137,7 @@ class NextDriverUiScreenshotsTest {
                     clock.setVideoContentBounds(android.graphics.RectF(0f, 0f, width.toFloat(), 360f))
                     root.addView(clock)
                     activity.setContentView(root)
-                    CarPlayClockSettings.save(activity, if (night) "left" else "right", 24)
+                    CarPlayClockSettings.save(activity, 24)
                     clock.update(true, night)
                     capture(root, width, "$name-clock-${if (night) "night-left" else "day-right"}", 360)
                     println("clock=$name night=$night text=${clock.text} width=${clock.width} height=${clock.height} baseline=${clock.baseline} padding=${clock.compoundPaddingLeft},${clock.compoundPaddingTop},${clock.compoundPaddingRight},${clock.compoundPaddingBottom} layoutWidth=${clock.layout.width} layoutHeight=${clock.layout.height} textWidth=${clock.paint.measureText(clock.text.toString())} font=${clock.paint.fontMetrics} scrollX=${clock.scrollX}")
@@ -101,18 +150,9 @@ class NextDriverUiScreenshotsTest {
                             if (ink.getPixel(x, y) == clock.currentTextColor) visibleTextPixels++
                         }
                         assertTrue("Clock must draw legible text: ${clock.text}", visibleTextPixels > 0)
-                        for (row in 0..2) {
-                            val expected = if (row == 1) android.graphics.Color.BLACK else android.graphics.Color.WHITE
-                            val top = ink.height * row / 3
-                            val bottom = ink.height * (row + 1) / 3
-                            var glyphPixels = 0
-                            for (y in top until bottom) for (x in 0 until ink.width) {
-                                if (ink.getPixel(x, y) == expected) glyphPixels++
-                            }
-                            assertTrue("Comparison row $row must render its time", glyphPixels > 0)
-                        }
                         assertEquals(android.graphics.Color.TRANSPARENT, ink.getPixel(0, 0))
-                        assertEquals(android.graphics.Color.BLACK, ink.getPixel(0, ink.height - 1))
+                        assertEquals("The fixed black plate must be removed", android.graphics.Color.TRANSPARENT,
+                            ink.getPixel(0, ink.height - 1))
                     } finally { ink.recycle() }
                     assertTrue(clock.left >= 0 && clock.right <= root.width)
                     assertTrue(clock.top >= 0 && clock.bottom <= root.height)
@@ -130,6 +170,32 @@ class NextDriverUiScreenshotsTest {
         assertEquals("BuickPlay-debug · CarPlay", org.robolectric.util.ReflectionHelpers.getField<android.app.ActivityManager.TaskDescription>(activity, "mTaskDescription").label)
         assertEquals("BuickPlay-debug", activity.applicationInfo.loadLabel(activity.packageManager))
         activity.finish()
+    }
+
+    @Test fun vehicleNightOptionsRemainReadableAtLargeFonts() {
+        val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup().visible()
+        val activity = controller.get()
+        try {
+            AirPlayPersistence.saveCarPlayNightMode(activity, CarPlayNightMode.VEHICLE)
+            for ((name, width, tag) in listOf(Triple("compact", 320, "zh-CN"), Triple("full", 1000, "zh-CN"), Triple("arabic", 320, "ar-SA"))) {
+                val locale = Locale.forLanguageTag(tag)
+                val config = Configuration(activity.resources.configuration).apply {
+                    fontScale = 1.5f
+                    screenWidthDp = width
+                    setLocale(locale)
+                    setLayoutDirection(locale)
+                }
+                @Suppress("DEPRECATION")
+                activity.resources.updateConfiguration(config, activity.resources.displayMetrics)
+                val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+                method("displaySettings", LinearLayout::class.java).invoke(activity, root)
+                capture(root, width, "$name-vehicle-night")
+                val mode = views(root).filterIsInstance<android.widget.Button>().first {
+                    it.text.startsWith(activity.getString(R.string.carplay_night_mode) + " · ")
+                }
+                assertTrue(mode.layout.height <= mode.height - mode.compoundPaddingTop - mode.compoundPaddingBottom)
+            }
+        } finally { controller.pause().stop().destroy() }
     }
 
     private fun method(name: String, type: Class<*>) = DiPlayActivity::class.java.getDeclaredMethod(name, type).apply { isAccessible = true }

@@ -26,6 +26,8 @@ data class AirPlayDeviceInfo(
 
 /** Session lifecycle and command callbacks for the driver/UI layer. */
 interface AirPlaySessionListener {
+    /** Current host decision, read on the control thread before /info; null keeps legacy behavior. */
+    fun currentAppearanceNight(): Boolean? = null
     fun onConnectionMilestone(session: AirPlaySession, milestone: ConnectionMilestone) {}
     fun onTcpAccepted(event: AirPlayTcpAccepted) {}
     /** Successful MFi response has been flushed to the control socket. */
@@ -102,7 +104,10 @@ class AirPlaySession(
     private var eventSocket: Socket? = null
     private var eventCipher: ControlCipher? = null
     private var eventCseq = 0
+    @Volatile private var desiredNightMode: Boolean? = null
     private var pendingNightMode: Boolean? = null
+    private data class NightRequest(val type: String, val night: Boolean, val atNanos: Long)
+    private val nightModeRequests = linkedMapOf<String, NightRequest>()
     private val firstTouchSendLogged = AtomicBoolean(false)
     private val touchSendFailureLogged = AtomicBoolean(false)
     // Only the controller's single touch thread calls sendTouch.
@@ -350,6 +355,22 @@ class AirPlaySession(
         val socket = eventSocket ?: return false
         val cipher = eventCipher ?: return false
         eventCseq++
+        val commandType = command["type"] as? String
+        if (commandType == "setNightMode" || commandType == "uiAppearanceUpdate") {
+            val params = command["params"] as? Map<*, *>
+            val night = if (commandType == "setNightMode") params?.get("nightMode") as? Boolean
+                else (params?.get("appearanceMode") as? Number)?.toInt()?.let { it == 1 }
+            if (night != null) {
+                nightModeRequests[eventCseq.toString()] = NightRequest(commandType, night, System.nanoTime())
+                while (nightModeRequests.size > 8) {
+                    val key = nightModeRequests.keys.first()
+                    val old = nightModeRequests.remove(key)!!
+                    debugLog("THEME_UNANSWERED cseq=$key type=${old.type} night=${old.night} reason=tracking_limit " +
+                        "ageMs=${(System.nanoTime() - old.atNanos) / 1_000_000} actualAppearance=unknown")
+                }
+                debugLog("THEME_REQUEST cseq=$eventCseq type=$commandType night=$night sessionId=${System.identityHashCode(this)} peer=${socket.remoteSocketAddress} atNs=${System.nanoTime()} actualAppearance=unknown")
+            }
+        }
         val body = BplistCodec.encode(command)
         val head = "POST /command RTSP/1.0\r\n" + extraHeaders +
             "Content-Type: $PLIST_CONTENT_TYPE\r\n" +
@@ -453,16 +474,31 @@ class AirPlaySession(
     }
 
     fun setNightMode(night: Boolean): Boolean = synchronized(eventWriteLock) {
+        desiredNightMode = night
         pendingNightMode = night
         sendPendingNightModeLocked()
     }
 
     private fun sendPendingNightModeLocked(): Boolean {
         val night = pendingNightMode ?: return true
-        val sent = sendCommandLocked(
+        val nightSent = sendCommandLocked(
             linkedMapOf("type" to "setNightMode", "params" to linkedMapOf("nightMode" to night)),
         )
+        // setNightMode alone allows iPhone location-based night mode to override day.
+        // The explicit main-screen appearance also bounds the map style on iOS 18.
+        val appearanceSent = nightSent && sendCommandLocked(linkedMapOf(
+            "type" to "uiAppearanceUpdate",
+            "params" to linkedMapOf(
+                "uuid" to AirPlayInfoPlist.MAIN_UUID,
+                "appearanceMode" to if (night) 1 else 0,
+                "appearanceSetting" to 1, // UserChoice: the host has already resolved its policy.
+            ),
+        ))
+        val sent = nightSent && appearanceSent
         if (sent) pendingNightMode = null
+        debugLog("THEME_DELIVERY night=$night written=$sent queued=${!sent} " +
+            "nightWritten=$nightSent appearanceWritten=$appearanceSent " +
+            "sessionId=${System.identityHashCode(this)} eventReady=${eventSocket != null && eventCipher != null} actualAppearance=unknown")
         return sent
     }
 
@@ -647,7 +683,9 @@ class AirPlaySession(
                 else RtspMessage.Response(headers = mapOf("Content-Type" to OCTET_CONTENT_TYPE), body = body)
             }
             path.endsWith("/info") -> {
-                val info = AirPlayInfoPlist.build(config)
+                val night = listener.currentAppearanceNight() ?: desiredNightMode
+                val info = AirPlayInfoPlist.build(config, night)
+                debugLog("THEME_INITIAL night=$night explicitAppearance=${night != null} actualAppearance=unknown")
                 if (request.body.isNotEmpty()) {
                     val requestInfo = try {
                         BplistCodec.decode(request.body).toString()
@@ -1000,7 +1038,18 @@ class AirPlaySession(
                 val parsed = RtspMessage.parseMessages(plaintext)
                 plaintext = parsed.rest
                 for (message in parsed.messages) {
-                    if (message.method.startsWith("RTSP/") || message.method.startsWith("HTTP/")) continue
+                    if (message.method.startsWith("RTSP/") || message.method.startsWith("HTTP/")) {
+                        val cseq = message.headers["cseq"] ?: "-"
+                        val night = synchronized(eventWriteLock) { nightModeRequests.remove(cseq) }
+                        if (night != null) {
+                            val body = if (message.body.isEmpty()) "empty" else runCatching {
+                                BplistCodec.decode(message.body).toString()
+                            }.getOrElse { "undecodable" }
+                            debugLog("THEME_RESPONSE cseq=$cseq type=${night.type} night=${night.night} status=${message.path} body=$body responseAfterMs=${(System.nanoTime() - night.atNanos) / 1_000_000} sessionId=${System.identityHashCode(this)} actualAppearance=unknown")
+                            trace("airplay theme response headers=${message.headers} bodyHex=${message.body.controlHex()}")
+                        }
+                        continue
+                    }
                     debugLog(
                         "airplay event rx ${message.method} ${message.path} cseq=${message.headers["cseq"] ?: "-"} body=${message.body.size}",
                     )
@@ -1021,6 +1070,16 @@ class AirPlaySession(
             closeCause = error
             if (!closed.get()) Log.e(TAG, "airplay event read failed", error)
         } finally {
+            // Closing must interrupt a blocked writer before diagnostics wait for its lock.
+            safeClose(socket)
+            synchronized(eventWriteLock) {
+                nightModeRequests.forEach { (cseq, request) ->
+                    debugLog("THEME_UNANSWERED cseq=$cseq type=${request.type} night=${request.night} reason=event_channel_closed " +
+                        "ageMs=${(System.nanoTime() - request.atNanos) / 1_000_000} " +
+                        "sessionId=${System.identityHashCode(this)} actualAppearance=unknown")
+                }
+                nightModeRequests.clear()
+            }
             debugLog("airplay event connection closed")
             videoPlaybackAvailability.setEventReady(false)
             if (eventSocket === socket) eventSocket = null

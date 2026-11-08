@@ -28,8 +28,6 @@
     <string name="waiting_phase_picture">Imagen</string>
     <string name="waiting_steps_title">Pasos de conexión</string>
     <string name="waiting_network_title">Estado de red</string>
-    <string name="waiting_details_show">Detalles de conexión</string>
-    <string name="waiting_details_hide">Ocultar detalles</string>
     <string name="waiting_current_time">Etapa actual: %1$d s</string>
     <string name="waiting_total_attempt">Total: %1$d s · Intento %2$d</string>
     <string name="waiting_duration">%1$.1f s</string>

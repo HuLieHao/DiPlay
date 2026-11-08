@@ -35,6 +35,8 @@ data class SettingsBackupEndpoint(val port: Int, val token: String, val code: St
  * them and may never use them; read in turn, one of those would hold up every request behind it
  * until it timed out. The requests themselves are still answered one at a time.
  */
+class ReportCollectionActiveException(message: String) : IllegalStateException(message)
+
 class SettingsBackupServer(
     private val page: ByteArray,
     private val export: () -> ByteArray,
@@ -47,6 +49,8 @@ class SettingsBackupServer(
     private val reportFile: (() -> File)? = null,
     private val archiveReport: ((String) -> File)? = null,
     private val archiveSessions: (() -> String)? = null,
+    /** Streams a fixed-prefix ZIP directly to the phone without allocating a local copy. */
+    private val archiveStream: ((String, java.io.OutputStream) -> Unit)? = null,
 ) {
     private var server: ServerSocket? = null
     private var thread: Thread? = null
@@ -68,6 +72,7 @@ class SettingsBackupServer(
     /** Called on the server thread when nobody used the page for [idleTimeoutMillis]. */
     var onIdle: (() -> Unit)? = null
     var idleTimeoutMillis = IDLE_TIMEOUT_MILLIS
+    var reportWriteTimeoutMillis = 30_000L
     /** The port asked for when the address may be typed; any free one is taken when it is busy. */
     var typedPort = TYPED_PORT
 
@@ -134,6 +139,7 @@ class SettingsBackupServer(
             } catch (_: SocketTimeoutException) {
                 // Anyone on the car's network can reach it, so it does not wait for them forever.
                 if (closed) break
+                if (reportInFlight.get()) { lastConnection = System.nanoTime(); continue }
                 if (System.nanoTime() - lastConnection < TimeUnit.MILLISECONDS.toNanos(idleTimeoutMillis.toLong())) continue
                 stop()
                 onIdle?.invoke()
@@ -167,7 +173,7 @@ class SettingsBackupServer(
                 it.soTimeout = 10_000
                 it.tcpNoDelay = true
                 val request = readRequest(it.getInputStream()) ?: return
-                if ((reportFile != null || archiveReport != null) && request.method == "GET" &&
+                if ((reportFile != null || archiveReport != null || archiveStream != null) && request.method == "GET" &&
                     request.path.substringBefore('?').trimEnd('/') == "/b/$token/report") {
                     serveReportFile(it, request)
                     return
@@ -230,18 +236,29 @@ class SettingsBackupServer(
         var file: File? = null
         var headersStarted = false
         try {
+            if (archiveStream != null) {
+                ReportWriteWatchdog.write(socket, reportWriteTimeoutMillis) { watched ->
+                    StreamingReportResponse.write(watched, { headersStarted = true }) { output ->
+                        archiveStream.invoke(selection, output)
+                    }
+                }
+                return
+            }
             val snapshot = archiveReport?.invoke(selection) ?: checkNotNull(reportFile).invoke()
             file = snapshot
             check(snapshot.isFile) { "Report snapshot is not a file" }
             if (closed || socket.isClosed) return
             snapshot.inputStream().use { input ->
-                FileReportResponse.write(input, socket.getOutputStream().buffered(32 * 1024),
-                    input.channel.size(), snapshot.name) { headersStarted = true }
+                ReportWriteWatchdog.write(socket, reportWriteTimeoutMillis) { watched ->
+                    FileReportResponse.write(input, watched.buffered(32 * 1024),
+                        input.channel.size(), snapshot.name) { headersStarted = true }
+                }
             }
         } catch (failure: Exception) {
             // Once headers have started, closing the socket is the only valid failure response.
             if (!headersStarted && !closed && !socket.isClosed)
-                error(500, "The head unit could not prepare this report. Try again.")
+                if (failure is ReportCollectionActiveException) error(409, failure.message ?: "Stop collection first.")
+                else error(500, "The head unit could not prepare this report. Try again.")
         } finally {
             runCatching { file?.takeIf { it.isFile }?.delete() }
             reportInFlight.set(false)

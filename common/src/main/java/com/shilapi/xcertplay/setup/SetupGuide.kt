@@ -61,7 +61,10 @@ object SetupGuide {
 
     private fun prefs(context: Context) = context.getSharedPreferences("diplay", Context.MODE_PRIVATE)
 
-    fun seen(context: Context): Boolean = prefs(context).getBoolean("setup_guide_seen", false)
+    fun seen(context: Context): Boolean {
+        com.shilapi.xcertplay.CarSetupDefaults.initialize(context)
+        return prefs(context).getBoolean("setup_guide_seen", false)
+    }
 
     fun markSeen(context: Context) {
         prefs(context).edit().putBoolean("setup_guide_seen", true).apply()

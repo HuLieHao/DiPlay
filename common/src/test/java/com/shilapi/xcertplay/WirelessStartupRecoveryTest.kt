@@ -72,6 +72,21 @@ class WirelessStartupRecoveryTest {
         assertFalse(handler.hasCallbacks(pending))
     }
 
+    @Test @Config(sdk = [27]) fun verifiedProfileFirstTcpCreditsGraceButOtherFailuresKeepBackoff() {
+        ReflectionHelpers.setStaticField(android.os.Build::class.java, "MODEL", "FF-5000")
+        ReflectionHelpers.setStaticField(android.os.Build::class.java, "HARDWARE", "ac8227l")
+        report()
+        assertEquals(android.os.SystemClock.uptimeMillis(), ReflectionHelpers.getField<Long>(activity, "pendingReconnectAt"))
+        assertEquals(1, budget().retries)
+        report()
+        assertEquals(1, budget().retries)
+        ReflectionHelpers.setField(activity, "restartGeneration", 1)
+        ReflectionHelpers.setField(activity, "reconnectScheduled", false)
+        report(1, CarPlayStatus.Failed("session timeout", startupFailure = WirelessStartupFailure.SESSION_TIMEOUT))
+        assertEquals(android.os.SystemClock.uptimeMillis() + 4_000,
+            ReflectionHelpers.getField<Long>(activity, "pendingReconnectAt"))
+    }
+
     @Test fun duplicateFailureAndCleanupErrorScheduleOnlyOneRetry() {
         report()
         report()

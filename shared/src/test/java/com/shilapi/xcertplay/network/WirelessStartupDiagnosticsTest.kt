@@ -8,6 +8,76 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WirelessStartupDiagnosticsTest {
+    @Test fun slowSnapshotReportsCaptureWindowRatherThanPretendingItIsInstant() {
+        val clock = java.util.concurrent.atomic.AtomicLong(0)
+        val captured = CountDownLatch(1)
+        val logs = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val diagnostics = WirelessStartupDiagnostics(
+            sample = { clock.set(2_000_000_000); "interfaceState=up" },
+            log = { logs.add(it); if (it.contains("interfaceState=up")) captured.countDown() },
+            nowNs = clock::get,
+        )
+        try {
+            diagnostics.start()
+            assertTrue(captured.await(2, TimeUnit.SECONDS))
+            assertTrue(logs.toString(), logs.any { it.contains("captureDurationMs=2000") && it.contains("captureStartAtMs=0") })
+        } finally { diagnostics.close() }
+    }
+
+    @Test fun sessionEstablishmentDoesNotClaimPictureReadyAndFirstFrameTimeIsStable() {
+        var clock = 0L
+        val logs = mutableListOf<String>()
+        val diagnostics = WirelessStartupDiagnostics({ "" }, logs::add, nowNs = { clock })
+        clock = 2_000_000_000L
+        diagnostics.sessionActive()
+        assertTrue(diagnostics.summary().contains("waitingFor=first_rendered_frame"))
+        clock = 3_000_000_000L
+        diagnostics.frameRendered()
+        clock = 9_000_000_000L
+        diagnostics.frameRendered()
+        val summary = diagnostics.summary()
+        assertTrue(summary, summary.contains("sessionActiveAtMs=2000"))
+        assertTrue(summary, summary.contains("firstFrameAtMs=3000"))
+        assertTrue(summary, summary.contains("firstFrameAfterSessionMs=1000"))
+        assertTrue(summary, summary.contains("waitingFor=none"))
+        diagnostics.close()
+        assertEquals(1, logs.count { it.contains("observation=ended") })
+    }
+
+    @Test fun environmentSnapshotDoesNotSilentlyLoseLinesAfterKernelCounters() {
+        val sampled = CountDownLatch(8)
+        val logs = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val diagnostics = WirelessStartupDiagnostics(
+            sample = { (1..8).joinToString("\n") { "evidenceLine=$it" } },
+            log = { logs.add(it); if (it.startsWith("wireless snapshot ")) sampled.countDown() },
+        )
+        try {
+            diagnostics.start()
+            assertTrue("Environment evidence after the fourth line must be retained", sampled.await(2, TimeUnit.SECONDS))
+            assertTrue(logs.any { it.endsWith("evidenceLine=8") })
+        } finally { diagnostics.close() }
+    }
+
+    @Test fun authenticationAndWifiHandoffHaveIndependentFirstEventTimings() {
+        var clock = 0L
+        val diagnostics = WirelessStartupDiagnostics({ "" }, {}, nowNs = { clock })
+        clock = 100_000_000L
+        diagnostics.controlProgress("iap2 authentication accepted")
+        clock = 300_000_000L
+        diagnostics.controlProgress("iap2 tx=0x5703 accessory-wifi-configuration")
+        clock = 400_000_000L
+        diagnostics.controlProgress("iap2 tx=0x4301 carplay-start-session")
+        clock = 1_300_000_000L
+        diagnostics.controlProgress("iap2 tx=0x5703 post-transport accessory-wifi-configuration")
+        diagnostics.connectionAccepted()
+        val summary = diagnostics.summary()
+        assertTrue(summary, summary.contains("authenticatedAtMs=100"))
+        assertTrue(summary, summary.contains("firstWifiConfigAtMs=300"))
+        assertTrue(summary, summary.contains("firstTcpAfterWifiConfigMs=1000"))
+        assertTrue(summary, summary.contains("firstTcpAfterStartMs=900"))
+        diagnostics.close()
+    }
+
     @Test fun observerExportsSummaryAndAllFourSnapshotLinesSeparately() {
         val sampled = CountDownLatch(4)
         val logs = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -65,7 +135,7 @@ class WirelessStartupDiagnosticsTest {
         diagnostics.connectionAccepted()
         assertTrue(diagnostics.summary().contains("waitingFor=AirPlay_protocol"))
         diagnostics.sessionActive()
-        assertTrue(diagnostics.summary().contains("sessionActive=true waitingFor=none"))
+        assertTrue(diagnostics.summary().contains("sessionActive=true waitingFor=first_rendered_frame"))
         diagnostics.close()
     }
 

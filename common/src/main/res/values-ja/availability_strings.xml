@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="waiting_availability_timeout">認証は成功しましたが、iPhone が 30 秒以内に CarPlay を開始しませんでした</string>
+    <string name="connection_help_availability">iPhone のロックを解除し、CarPlay の確認画面を確認してください。接続できない場合は再試行してください。</string>
+</resources>

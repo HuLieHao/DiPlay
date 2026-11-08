@@ -44,10 +44,10 @@ class HotspotNetworkDiagnosticsUiTest {
                     View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
                 root.layout(0, 0, width, height)
                 val texts = descendants(root).filterIsInstance<TextView>().toList()
-                val collect = texts.single { it.text == activity.getString(R.string.settings_hotspot_capture) }
-                assertTrue(collect.isEnabled)
+                val collect = texts.single { it.text == activity.getString(R.string.settings_capture_stop) }
+                assertFalse("No active FF5000 collector on this test device", collect.isEnabled)
                 assertTrue(texts.any { it.text == activity.getString(R.string.save_diagnostic_report) })
-                assertTrue(texts.any { it.text == activity.getString(R.string.settings_hotspot_capture_description) })
+                assertTrue(texts.any { it.text == activity.getString(R.string.settings_capture_hint) })
                 val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 try {
                     root.draw(Canvas(bitmap))

@@ -14,6 +14,7 @@ data class AirPlayTcpAccepted(
     val listener: AirPlayListenerIdentity,
     val internal: Boolean,
     val acceptedAtNanos: Long,
+    val peerAddress: String? = null,
 )
 
 internal fun isInternalAirPlayPeer(peer: InetAddress, local: InetAddress): Boolean =

@@ -18,6 +18,7 @@ import java.util.ArrayDeque
  */
 class Iap2LinkEngine(
     private val config: Iap2LinkConfig = Iap2LinkConfig(),
+    private val onDiagnostic: (String) -> Unit = {},
 ) {
     enum class State {
         IDLE,
@@ -119,6 +120,8 @@ class Iap2LinkEngine(
         val payload: ByteArray,
         var retransmissions: Int = 0,
         var deadlineMillis: Long = 0,
+        val diagnosticId: Long = 0,
+        val context: String = "",
     )
 
     private var state = State.IDLE
@@ -136,6 +139,8 @@ class Iap2LinkEngine(
     private val outOfOrder = ArrayList<Packet>()
     private val events = ArrayDeque<Event>()
     private val output = ByteArrayOutputStream()
+    private val pendingWrites = ArrayList<String>()
+    private var nextDiagnosticId = 0L
     private val receive = ReceiveBuffer()
     private var awaitingPayload: Header? = null
 
@@ -153,8 +158,34 @@ class Iap2LinkEngine(
     fun takeOutput(): ByteArray {
         val bytes = output.toByteArray()
         output.reset()
+        pendingWrites.clear()
         return bytes
     }
+
+    /** send returning means the stream API completed, not peer/application receipt.
+     * On failure the stream may have written an unknown prefix of this coalesced batch.
+     */
+    internal fun flushOutput(send: (ByteArray) -> Unit) {
+        val writes = pendingWrites.toList()
+        val bytes = takeOutput()
+        if (bytes.isEmpty()) return
+        try {
+            send(bytes)
+        } catch (failure: Throwable) {
+            writes.forEach { diagnostic("event=stream_write_failed $it batch_bytes=${bytes.size} partial=unknown error=${failure.javaClass.simpleName}") }
+            throw failure
+        }
+        writes.forEach { diagnostic("event=stream_write_complete $it batch_bytes=${bytes.size} peer_delivery=unknown") }
+    }
+
+    private fun diagnostic(message: String) {
+        try { onDiagnostic("IAP2 LINK $message") } catch (_: Throwable) {
+            // Observational logging must not terminate the link.
+        }
+    }
+
+    private fun packetContext(packet: Packet): String =
+        "packet=${packet.diagnosticId} seq=${packet.sequence} session=${packet.sessionId} bytes=${packet.payload.size} retry=${packet.retransmissions} ${packet.context}"
 
     fun pollEvent(): Event? = if (events.isEmpty()) null else events.removeFirst()
 
@@ -248,7 +279,7 @@ class Iap2LinkEngine(
     }
 
     /** Queues one raw payload on a negotiated iAP2 session. */
-    fun sendSession(sessionId: Int, bytes: ByteArray, nowMillis: Long) {
+    fun sendSession(sessionId: Int, bytes: ByteArray, nowMillis: Long, diagnosticContext: String = "") {
         require(sessionId in 0..0xff) { "iAP2 session id must fit in one byte" }
         require(bytes.size <= MAX_PAYLOAD_BYTES) {
             "iAP2 session payload exceeds $MAX_PAYLOAD_BYTES bytes"
@@ -258,7 +289,9 @@ class Iap2LinkEngine(
                 "iAP2 session payload exceeds peer maxLength ${peerSynchronization.maxLength}"
             }
         }
-        sendPacket(Packet(0, sessionId, bytes.copyOf()), nowMillis)
+        val packet = Packet(0, sessionId, bytes.copyOf(), diagnosticId = ++nextDiagnosticId, context = diagnosticContext.take(256))
+        diagnostic("event=engine_queued packet=${packet.diagnosticId} session=$sessionId bytes=${bytes.size} $diagnosticContext")
+        sendPacket(packet, nowMillis)
     }
 
     private fun parseAvailable(nowMillis: Long): Boolean {
@@ -353,6 +386,7 @@ class Iap2LinkEngine(
         if (state != State.NEGOTIATING) return
         peerSynchronization = sync
         peerSynchronizationReceived = true
+        diagnostic("event=peer_sync max_outgoing=${sync.maxOutgoing} max_length=${sync.maxLength} retransmit_ms=${sync.retransmissionTimeoutMillis} ack_ms=${sync.acknowledgementTimeoutMillis} max_retries=${sync.maxRetransmissions} max_acks=${sync.maxAcknowledgements} local_zero_acks=${config.zeroAcknowledgements}")
         lastReceivedInOrder = sequence
         lastAcknowledgedReceived = sequence
         sendAcknowledgement()
@@ -367,6 +401,15 @@ class Iap2LinkEngine(
             state = State.NORMAL
             synchronizationDeadlineMillis = null
             setWritable(true)
+        }
+        diagnostic("event=rx_link_ack ack=$acknowledgement outstanding=${unacknowledged.size}")
+        // Only an ACK that names a currently outstanding packet establishes a cumulative
+        // prefix. Do not mistake the existing cleanup heuristic for proof of peer receipt.
+        val acknowledgedIndex = unacknowledged.indexOfFirst { it.sequence == acknowledgement }
+        if (acknowledgedIndex >= 0) {
+            unacknowledged.take(acknowledgedIndex + 1).forEach {
+                diagnostic("event=peer_link_ack ${packetContext(it)} ack=$acknowledgement application_acceptance=unknown")
+            }
         }
         lastSentAcknowledged = acknowledgement
 
@@ -399,7 +442,7 @@ class Iap2LinkEngine(
                 die("iAP2 packet ${packet.sequence} was not acknowledged")
                 return
             }
-            sendData(packet.sequence, packet.sessionId, packet.payload)
+            sendData(packet)
             sendAcknowledgementDeadlineMillis = null
             receiveAcknowledgementDeadlineMillis = packet.deadlineMillis
         }
@@ -470,7 +513,7 @@ class Iap2LinkEngine(
         packet.retransmissions = 0
         packet.deadlineMillis = nowMillis + peerSynchronization.retransmissionTimeoutMillis
         sendAcknowledgementDeadlineMillis = null
-        sendData(packet.sequence, packet.sessionId, packet.payload)
+        sendData(packet)
         lastAcknowledgedReceived = lastReceivedInOrder
         if (peerSynchronization.maxRetransmissions > 0) {
             unacknowledged += packet
@@ -490,7 +533,7 @@ class Iap2LinkEngine(
             die("iAP2 packet ${next.sequence} was not acknowledged")
             return
         }
-        sendData(next.sequence, next.sessionId, next.payload)
+        sendData(next)
         receiveAcknowledgementDeadlineMillis = secondDeadline ?: next.deadlineMillis
     }
 
@@ -506,8 +549,19 @@ class Iap2LinkEngine(
         writePacket(missing.map { it.toByte() }.toByteArray(), sentSequence, CONTROL_EXTENDED_ACKNOWLEDGEMENT, 0)
     }
 
-    private fun sendData(sequence: Int, sessionId: Int, payload: ByteArray) {
-        writePacket(payload, sequence, CONTROL_ACKNOWLEDGEMENT, sessionId)
+    private fun sendData(packet: Packet) {
+        val before = output.size()
+        writePacket(packet.payload, packet.sequence, CONTROL_ACKNOWLEDGEMENT, packet.sessionId)
+        if (output.size() > before) {
+            val context = packetContext(packet)
+            // Keep diagnostic retention bounded independently of protocol output limits.
+            if (pendingWrites.size < MAX_PENDING_WRITE_DIAGNOSTICS) pendingWrites += context
+            else if (pendingWrites.size == MAX_PENDING_WRITE_DIAGNOSTICS) {
+                pendingWrites += "metadata=truncated"
+                diagnostic("event=write_metadata_truncated limit=$MAX_PENDING_WRITE_DIAGNOSTICS")
+            }
+            diagnostic("event=wire_queued $context")
+        }
     }
 
     private fun writePacket(payload: ByteArray?, sequence: Int, control: Int, sessionId: Int) {
@@ -548,6 +602,7 @@ class Iap2LinkEngine(
         state = State.DEAD
         writable = false
         output.reset()
+        pendingWrites.clear()
         events.clear()
         events += Event.Dead(reason)
     }
@@ -637,6 +692,7 @@ class Iap2LinkEngine(
     }
 
     companion object {
+        private const val MAX_PENDING_WRITE_DIAGNOSTICS = 4096
         const val CONTROL_SESSION_ID = 10
         const val EA_SESSION_ID = 11
         const val FILE_TRANSFER_SESSION_ID = 12

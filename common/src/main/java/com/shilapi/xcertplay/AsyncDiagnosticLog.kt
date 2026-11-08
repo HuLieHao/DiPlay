@@ -7,7 +7,10 @@ import java.util.Locale
 /** Queued entries retain only their exact file target and bounded original diagnostic text. */
 internal object AsyncDiagnosticLog {
     private data class Entry(val target: SessionLogFile, val line: String?)
-    private val writer = BoundedDiagnosticWriter<Entry> { writeEntry(it) }
+    // A handshake emits hundreds of lines while an existing archive is first scanned.
+    // Keep this bounded; individual entries are already capped at 64 KiB characters.
+    private const val QUEUE_CAPACITY = 512
+    private val writer = BoundedDiagnosticWriter<Entry>(maxPending = QUEUE_CAPACITY) { writeEntry(it) }
     private var observedDrops = 0L
     private fun writeEntry(entry: Entry) {
         val dropped = writer.droppedCount
@@ -19,6 +22,7 @@ internal object AsyncDiagnosticLog {
     }
 
     fun append(target: SessionLogFile?, message: String, nowMillis: Long = System.currentTimeMillis()) {
+        StartupCapture.append(message, nowMillis)
         if (target == null) return
         val safe = DiagnosticRedactor.original(message)
         val timestamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(nowMillis))
@@ -26,7 +30,7 @@ internal object AsyncDiagnosticLog {
     }
 
     fun close(target: SessionLogFile?) { if (target != null) writer.enqueue(Entry(target, null)) }
-    fun status(): String = "queueCapacity=64 pending=${writer.pendingCount} dropped=${writer.droppedCount} oversizedEntries=explicitly_marked"
+    fun status(): String = "queueCapacity=$QUEUE_CAPACITY pending=${writer.pendingCount} dropped=${writer.droppedCount} oversizedEntries=explicitly_marked"
 
     internal fun awaitIdle(timeoutMillis: Long): Boolean = writer.awaitIdle(timeoutMillis)
 }

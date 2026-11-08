@@ -7,6 +7,20 @@ import com.shilapi.xcertplay.orchestration.MfiTarget
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 
 object ConnectionSettingsSection {
+    const val BOARD_MFI_PATH = "/dev/i2c-2"
+
+    fun boardMfiAvailable(context: Context): Boolean =
+        context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
+            Build.MODEL.replace('_', '-').equals("FF-5000", ignoreCase = true)
+
+    fun mfiOptions(context: Context, selected: MfiTarget): List<Pair<MfiTarget, String>> = buildList {
+        add(MfiTarget.LOCAL to context.getString(R.string.local_offline))
+        add(MfiTarget.USB_CH341 to context.getString(R.string.usb_ch341))
+        if (boardMfiAvailable(context) || selected == MfiTarget.I2C) {
+            add(MfiTarget.I2C to context.getString(R.string.settings_board_mfi))
+        }
+    }
+
 
     fun createMfiTargetChoice(
         context: Context,
@@ -16,10 +30,7 @@ object ConnectionSettingsSection {
     ): SettingsWidgets.ChoiceRowResult<MfiTarget> = SettingsWidgets.createChoiceRow(
         context = context,
         label = context.getString(R.string.mfi_certificate_signing_target),
-        options = listOf(
-            MfiTarget.LOCAL to context.getString(R.string.local_offline),
-            MfiTarget.USB_CH341 to context.getString(R.string.usb_ch341),
-        ),
+        options = mfiOptions(context, selected),
         selected = selected,
         theme = theme,
         onSelected = onSelected,

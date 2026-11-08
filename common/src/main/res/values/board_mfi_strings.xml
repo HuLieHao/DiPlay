@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_board_mfi">Onboard MFi chip (experimental)</string>
+    <string name="settings_board_mfi_description">Uses the onboard authentication chip. Applies on the next connection; no automatic software fallback. Select local software authentication to switch back.</string>
+</resources>

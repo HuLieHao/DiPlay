@@ -17,7 +17,12 @@
     <string name="carplay_night_end">夜间结束</string>
     <string name="carplay_night_schedule_hint">使用车机本地时间。开始和结束时间须不同，可设置跨午夜时段。</string>
     <string name="carplay_night_schedule_same_time">开始和结束时间不能相同。</string>
-    <string name="carplay_night_hint">保存后返回 CarPlay 即可应用。</string>
+    <string name="carplay_night_hint">CarPlay 外观请选择“自动”。保存后返回 CarPlay 即可应用，无需重连。</string>
     <string name="carplay_night_ambient_hint">使用下方的亮度门槛与切换延迟。若没有光线传感器，则跟随 Android 系统。</string>
-    <string name="carplay_night_time_note">在 CarPlay 内的外观设置选择“自动”时，也会参考 iPhone 时间。即使选择固定日间，在夜间仍可能显示深色外观。</string>
+    <string name="carplay_night_time_note">地图配色由地图应用决定。</string>
+    <string name="carplay_night_vehicle">跟随车辆小灯</string>
+    <string name="carplay_night_vehicle_hint">只读获取车辆小灯状态，无需 root。未读到有效状态时按关灯（日间）处理，只有明确读到开灯才切换夜间。</string>
+    <string name="carplay_night_vehicle_fallback">小灯状态未知 · 按日间处理</string>
+    <string name="carplay_night_no_result">暂无结果，打开 CarPlay 后读取。</string>
+    <string name="carplay_night_last_result">最近一次判定：%1$s · %2$s</string>
 </resources>

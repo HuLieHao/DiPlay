@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.media
 
 import android.media.AudioAttributes
 import android.media.AudioTrack
+import com.shilapi.xcertplay.diagnostics.AudioCaptureEvents
 import com.shilapi.xcertplay.airplay.AudioCodecKind
 import com.shilapi.xcertplay.airplay.AudioFormat
 import org.junit.Assert.*
@@ -81,7 +82,7 @@ class AudioRebufferDiagnosticsTest {
             val audioPacketClass = Class.forName("com.shilapi.xcertplay.media.AudioRenderer\$AudioPacket")
             val packetConstructor = audioPacketClass.declaredConstructors.single().apply { isAccessible = true }
             val dummyRtp = ByteArray(12 + 100)
-            val packetInstance = packetConstructor.newInstance(dummyRtp, 0)
+            val packetInstance = packetConstructor.newInstance(dummyRtp, 0, AudioEvidence.Packet(0, 0, System.nanoTime()))
 
             type.getDeclaredMethod("handle", audioPacketClass).apply { isAccessible = true }.invoke(renderer, packetInstance)
 
@@ -93,8 +94,10 @@ class AudioRebufferDiagnosticsTest {
     }
 
     @Test
-    fun rebufferAndQueueFullReportsAreCappedAtFiveEvents() {
+    fun briefReportsStayCappedButAllRendererAnomaliesSurviveBeyondFive() {
         val reports = mutableListOf<String>()
+        val anomalies = mutableListOf<String>()
+        AudioCaptureEvents.setSink { anomalies.add(it) }
         val plan = MediaAudioBuffer.plan(true, 48_000, 2, 4096, 500)
         val threshold = MediaAudioBuffer.startBytesFor(plan.startBytes, plan.trackBufferBytes, 4096)
 
@@ -161,6 +164,9 @@ class AudioRebufferDiagnosticsTest {
             assertEquals(5, reports.count { it.startsWith("Audio: clock state") && it.contains("event=before-pause") })
             assertEquals(5, reports.count { it.startsWith("Audio: clock state") && it.contains("event=after-recovery") })
             assertEquals(10, get("rebufferCount") as Int)
+            assertEquals(10, anomalies.count { it.startsWith("REBUFFER_PAUSE\t") })
+            assertEquals(10, anomalies.count { it.startsWith("REBUFFER_RECOVERY\t") })
+            assertTrue(anomalies.filter { it.startsWith("REBUFFER_PAUSE\t") }.last().contains("count=10"))
 
             // Test queue full cap over 10 overflow/drain cycles
             set("started", true)
@@ -168,7 +174,7 @@ class AudioRebufferDiagnosticsTest {
             val audioPacketClass = Class.forName("com.shilapi.xcertplay.media.AudioRenderer\$AudioPacket")
             val packetConstructor = audioPacketClass.declaredConstructors.single().apply { isAccessible = true }
             val dummyRtp = ByteArray(12 + 100)
-            val packetInstance = packetConstructor.newInstance(dummyRtp, 0)
+            val packetInstance = packetConstructor.newInstance(dummyRtp, 0, AudioEvidence.Packet(0, 0, System.nanoTime()))
 
             @Suppress("UNCHECKED_CAST")
             val queue = get("queue") as java.util.concurrent.BlockingQueue<Any>
@@ -195,8 +201,11 @@ class AudioRebufferDiagnosticsTest {
 
             val queueFullReports = reports.filter { it.contains("Audio: queue full") }
             assertEquals(5, queueFullReports.size)
+            assertEquals(10, anomalies.count { it.startsWith("QUEUE_DROP\t") && it.contains("reason=full") })
+            assertEquals(1, anomalies.map { it.split('\t')[1] }.toSet().size)
 
         } finally {
+            AudioCaptureEvents.setSink(null)
             track.release()
         }
     }

@@ -2,10 +2,8 @@
     <string name="task_connection_management">إدارة الاتصال</string>
     <string name="task_carplay">CarPlay</string>
     <string name="settings_clock">ساعة النظام</string>
-    <string name="settings_clock_off">إيقاف</string>
-    <string name="settings_clock_left">أسفل اليسار</string>
-    <string name="settings_clock_right">أسفل اليمين</string>
     <string name="settings_clock_size">حجم نص الساعة</string>
-    <string name="settings_clock_description">تستخدم وقت نظام السيارة وليس ساعة iPhone. تُطبق التغييرات عند العودة إلى CarPlay. تُترك مساحة لشريط التطبيقات؛ تحقق من الموضع أثناء الوقوف.</string>
+    <string name="settings_clock_description">ثابتة أسفل اليسار وتستخدم وقت النظام. خلفية شفافة، ونص أسود نهارًا وأبيض ليلًا وفق نهار وليل CarPlay. تُطبق التغييرات عند العودة إلى CarPlay دون إعادة الاتصال.</string>
     <string name="settings_clock_unknown">الوقت غير معروف —</string>
+    <string name="disconnecting_carplay">جارٍ قطع اتصال CarPlay…</string>
 </resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_board_mfi">Встроенный чип MFi (экспериментально)</string>
+    <string name="settings_board_mfi_description">Использует встроенный чип при следующем подключении. Автоматического возврата к программной аутентификации нет. Для возврата выберите локальную аутентификацию.</string>
+</resources>

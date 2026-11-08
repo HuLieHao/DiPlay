@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_board_mfi">شريحة MFi المدمجة (تجريبي)</string>
+    <string name="settings_board_mfi_description">يستخدم شريحة المصادقة المدمجة عند الاتصال التالي. لا يعود تلقائياً إلى مصادقة البرنامج؛ يمكنك اختيار المصادقة المحلية للعودة.</string>
+</resources>

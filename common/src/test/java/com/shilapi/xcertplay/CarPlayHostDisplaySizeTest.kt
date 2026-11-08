@@ -48,6 +48,8 @@ class CarPlayHostDisplaySizeTest {
 
     @Before fun setUp() {
         activity = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
+        // Isolate window/session tests from OEM lighting service binding.
+        AirPlayPersistence.saveCarPlayNightMode(activity, CarPlayNightMode.DAY)
         // These fixtures exercise visible window negotiation unless a test explicitly stops it.
         setField("isActivityStarted", true)
         AirPlayPersistence.saveAdaptPipResolution(activity, false)
@@ -80,6 +82,55 @@ class CarPlayHostDisplaySizeTest {
         (getField("airPlayCommandExecutor") as ExecutorService).shutdownNow()
         CarPlayBackgroundSession.clear()
         controllerConstruction.close()
+    }
+
+    @Test fun creditedRetryWaitsForCleanupBeforeConstructingReplacementController() {
+        allowStartup()
+        startSession()
+        // Start the normal host once so the existing controller is real from the host's perspective.
+        activity.javaClass.getDeclaredMethod("maybeStartCarPlay").apply { isAccessible = true }.invoke(activity)
+        val old = getField("controller") as CarPlayController
+        val constructedBefore = controllerConstruction.constructed().size
+        var waits = 0
+        org.mockito.Mockito.`when`(old.awaitClosed(org.mockito.ArgumentMatchers.anyLong())).thenAnswer {
+            assertEquals("A timed-out teardown cannot overlap a replacement", constructedBefore,
+                controllerConstruction.constructed().size)
+            ++waits >= 3
+        }
+        activity.javaClass.getDeclaredMethod("restartCarPlay", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }.invoke(activity, "credited retry", true)
+        finishTeardown()
+        assertEquals(3, waits)
+        assertEquals(constructedBefore + 1, controllerConstruction.constructed().size)
+    }
+
+    @Test fun cancelledCreditedRetryCannotConstructAfterCleanupWait() {
+        allowStartup()
+        startSession()
+        activity.javaClass.getDeclaredMethod("maybeStartCarPlay").apply { isAccessible = true }.invoke(activity)
+        val old = getField("controller") as CarPlayController
+        val constructedBefore = controllerConstruction.constructed().size
+        org.mockito.Mockito.`when`(old.awaitClosed(org.mockito.ArgumentMatchers.anyLong())).thenAnswer {
+            setField("restartGeneration", (getField("restartGeneration") as Int) + 1)
+            false
+        }
+        activity.javaClass.getDeclaredMethod("restartCarPlay", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }.invoke(activity, "credited retry", true)
+        finishTeardown()
+        assertEquals(constructedBefore, controllerConstruction.constructed().size)
+    }
+
+    @Test fun reusedHostReloadsSavedBoardMfiPathWhenStartingConnection() {
+        allowStartup()
+        CarPlayBackgroundSession.clear()
+        CarPlayBackgroundSession.allowAutomaticConnection()
+        setField("mfiI2cPath", "/dev/i2c-1")
+        AirPlayPersistence.saveMfiI2cPath(activity, "/dev/i2c-2")
+        AirPlayPersistence.saveMfiTarget(activity, MfiTarget.I2C)
+        activity.javaClass.getDeclaredMethod("startCarPlay", sizeClass).apply { isAccessible = true }
+            .invoke(activity, size(800, 480))
+        assertEquals("/dev/i2c-2", getField("mfiI2cPath"))
+        assertEquals(MfiTarget.I2C, getField("mfiTarget"))
     }
 
     @Test fun stoppedWindowResizeCannotRestartRetainedSessionOrChangeItsCanvas() {
@@ -121,8 +172,8 @@ class CarPlayHostDisplaySizeTest {
         assertTrue(AsyncDiagnosticLog.awaitIdle(2000))
         val archive = DiagnosticArchive.forLogs(java.io.File(activity.filesDir, "logs"))
         val oldId = Regex("session=([^ ]+)").find(archive.correlation())!!.groupValues[1]
-        activity.javaClass.getDeclaredMethod("restartCarPlay", String::class.java).apply { isAccessible = true }
-            .invoke(activity, "test return connection")
+        activity.javaClass.getDeclaredMethod("restartCarPlay", String::class.java, Boolean::class.javaPrimitiveType).apply { isAccessible = true }
+            .invoke(activity, "test return connection", false)
         finishTeardown()
         assertNotSame("a new controller must capture its own immutable archive target", oldTarget, getField("sessionLog"))
         val newListener = activity.javaClass.getDeclaredMethod("createSessionListener", Int::class.javaPrimitiveType)
@@ -505,8 +556,8 @@ class CarPlayHostDisplaySizeTest {
         allowStartup()
         startSession(rotation = Surface.ROTATION_180)
         scheduleSize(1920, 990)
-        activity.javaClass.getDeclaredMethod("restartCarPlay", String::class.java)
-            .apply { isAccessible = true }.invoke(activity, "Test reconnect")
+        activity.javaClass.getDeclaredMethod("restartCarPlay", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }.invoke(activity, "Test reconnect", false)
         finishTeardown()
         assertNull(getField("sessionDisplay"))
 
@@ -549,7 +600,7 @@ class CarPlayHostDisplaySizeTest {
         startSession()
         val view = TextureView(activity).apply { layout(10, 20, 1930, 962) }
         val clock = CarPlayClockOverlay(activity, Handler(Looper.getMainLooper()))
-        CarPlayClockSettings.save(activity, "left", 20)
+        CarPlayClockSettings.save(activity, 20)
         setField("videoView", view)
         setField("clockOverlay", clock)
         activity.javaClass.getDeclaredMethod("updateVideoLayout", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
@@ -557,7 +608,7 @@ class CarPlayHostDisplaySizeTest {
         val content = CarPlayVideoLayout.fit(1920, 990, 1920, 942)
         val params = clock.layoutParams as android.widget.FrameLayout.LayoutParams
         assertEquals((content.left + 10).toInt(), params.leftMargin)
-        assertEquals((20 + content.top + content.height * (1f - 258f / 858f)).toInt(), params.topMargin)
+        assertEquals((20 + content.top + content.height * (1f - 146f / 858f)).toInt(), params.topMargin)
         assertEquals(32f * content.height / 858f, clock.textSize, .01f)
     }
 

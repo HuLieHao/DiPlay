@@ -5,6 +5,30 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AsyncDiagnosticLogTest {
+    @Test fun startupBurstSurvivesTemporaryArchiveWriteDelay() {
+        val folder = Files.createTempDirectory("startup-burst").toFile()
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val target = SessionLogFile(folder.resolve("diplay.log"), "startup", lazy {
+            entered.countDown()
+            check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            "versionCode=test"
+        })
+        try {
+            AsyncDiagnosticLog.append(target, "first")
+            assertTrue(entered.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            repeat(300) { AsyncDiagnosticLog.append(target, "burst-entry-$it-END") }
+            release.countDown()
+            assertTrue(AsyncDiagnosticLog.awaitIdle(5000))
+            val text = folder.resolve("diplay.log").readText()
+            repeat(300) { assertTrue("missing burst entry $it", text.contains("burst-entry-$it-END")) }
+        } finally {
+            release.countDown()
+            AsyncDiagnosticLog.awaitIdle(5000)
+            folder.deleteRecursively()
+        }
+    }
+
     @Test fun admittingConnectionTargetsDoesNoDiskOrBuildProbeAndRetainsRecordingBuild() {
         val folder = Files.createTempDirectory("lazy-run-target").toFile()
         try {

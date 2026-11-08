@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_capture_stop">Зупинити збір</string>
+    <string name="settings_capture_stop_first">Зупиніть збір перед збереженням або завантаженням звіту.</string>
+    <string name="settings_capture_status">Докладний збір · %1$d секунд</string>
+    <string name="settings_capture_hint">Збір починається під час відкриття. Відтворіть проблему, зупиніть збір і завантажте звіт.</string>
+    <string name="settings_capture_heavy_audio">Докладні знімки аудіо та сканування потоків</string>
+    <string name="settings_capture_heavy_audio_description">Застосовується під час збору. Увімкнено: дампи аудіослужб і відомості про потоки. Вимкнено: їх пропущено, але збережено початкові аудіоподії, PCAP і коротку статистику. Поточну перевірку скасовано; повторне підключення не потрібне.</string>
+</resources>

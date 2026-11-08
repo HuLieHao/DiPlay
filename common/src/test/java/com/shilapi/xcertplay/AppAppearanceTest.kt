@@ -33,6 +33,7 @@ class AppAppearanceTest {
     }
 
     @Test fun autoFallsBackToTheSavedCarPlayPolicyOutsideTheHost() {
+        assertFalse(resolveAppNight(AppAppearance.AUTO, CarPlayNightMode.VEHICLE, schedule, true, 23 * 60, null))
         assertFalse(resolveAppNight(AppAppearance.AUTO, CarPlayNightMode.DAY, schedule, true, 23 * 60, null))
         assertTrue(resolveAppNight(AppAppearance.AUTO, CarPlayNightMode.NIGHT, schedule, false, 12 * 60, null))
         assertTrue(resolveAppNight(AppAppearance.AUTO, CarPlayNightMode.SYSTEM, schedule, true, 12 * 60, null))

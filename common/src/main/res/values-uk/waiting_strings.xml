@@ -28,8 +28,6 @@
     <string name="waiting_phase_picture">Зображення</string>
     <string name="waiting_steps_title">Етапи підключення</string>
     <string name="waiting_network_title">Стан мережі</string>
-    <string name="waiting_details_show">Відомості про підключення</string>
-    <string name="waiting_details_hide">Згорнути відомості</string>
     <string name="waiting_current_time">Поточний етап: %1$d с</string>
     <string name="waiting_total_attempt">Разом: %1$d с · Спроба %2$d</string>
     <string name="waiting_duration">%1$.1f с</string>

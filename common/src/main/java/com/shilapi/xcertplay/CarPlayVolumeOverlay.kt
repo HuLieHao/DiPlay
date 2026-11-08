@@ -19,7 +19,7 @@ internal fun carPlayVolumeStream(playback: NavigationPlaybackSnapshot, calling: 
 }
 
 internal object CarPlayVolumeSettings {
-    fun enabled(context: Context) = context.getSharedPreferences("diplay_volume", 0).getBoolean("enabled", false)
+    fun enabled(context: Context) = context.getSharedPreferences("diplay_volume", 0).getBoolean("enabled", com.shilapi.xcertplay.media.Ff5000AudioProfile.supported() && AirPlayPersistence.loadMediaAudioChannel(context) in setOf(0, 3))
     fun save(context: Context, enabled: Boolean) { context.getSharedPreferences("diplay_volume", 0).edit().putBoolean("enabled", enabled).apply() }
 }
 
@@ -85,24 +85,34 @@ internal class CarPlayVolumeKeyRouter(
     fun owns(key: Int, device: Int, downTime: Long) = keys.owns(key, device, downTime)
     fun onKey(action: Int, key: Int, device: Int, downTime: Long, repeat: Int): Boolean {
         val press = Triple(device, key, downTime)
+        val eligibleStream = stream()
+        var decision = "stream=${eligibleStream ?: "unknown"}"
         val handled = keys.onKey(
-            action, key, device, downTime, repeat, stream() != null,
+            action, key, device, downTime, repeat, eligibleStream != null,
         ) adjust@{ delta ->
             try {
                 val selected = stream() ?: return@adjust false
                 val original = streams[press]
                 if (original != null && selected != original) return@adjust false
                 val max = maximum(selected)
-                val target = navigationWheelTarget(read(selected), minimum(selected), max, delta) ?: return@adjust false
+                val current = read(selected)
+                val min = minimum(selected)
+                val target = navigationWheelTarget(current, min, max, delta) ?: return@adjust false
                 if (stream() != selected) return@adjust false
                 write(selected, target, 0) // Never request the OEM/system volume window for a handled key.
-                (read(selected) == target).also {
+                val readback = read(selected)
+                decision = "stream=$selected current=$current target=$target readback=$readback"
+                (readback == target).also {
                     if (it) {
                         streams[press] = selected
                         displayed(selected, target, max)
                     }
                 }
-            } catch (_: Exception) { false }
+            } catch (error: Exception) { decision += " error=${error.javaClass.simpleName}"; false }
+        }
+        // Existing bounded diagnostic ring, first DOWN only; never log repeats or audio frames.
+        if (action == 0 && repeat == 0 && NavigationWheelKeyPolicy.volumeStep(key) != null) {
+            runCatching { WheelKeyLog.note("volume host key=$key $decision handled=$handled") }
         }
         if (action == 1) streams.remove(press)
         return handled

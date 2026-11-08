@@ -23,6 +23,7 @@ class Iap2CsmChannel private constructor(
     private val framer = Iap2CsmFramer()
     private val receivedFrames = ArrayDeque<Iap2Frame>()
     private var receivedBytes = 0
+    private var nextFrameId = 0L
     private var closed = false
     private var terminalFailure: Throwable? = null
 
@@ -71,9 +72,13 @@ class Iap2CsmChannel private constructor(
                 ?: throw IllegalStateException("CSM send requires a successful iAP2 awaitReady")
             val chunks = Iap2CsmFramer.splitForLink(frame, peerLimit)
             val deadlineNanos = deadlineAfter(timeoutMillis)
-            for (chunk in chunks) {
+            val frameId = ++nextFrameId
+            for ((index, chunk) in chunks.withIndex()) {
                 val queued = try {
-                    link.sendControlAwaitCapacity(chunk, remainingMillis(deadlineNanos))
+                    link.sendControlAwaitCapacity(
+                        chunk, remainingMillis(deadlineNanos),
+                        "csm_frame=$frameId message=0x${frame.messageId.toString(16).padStart(4, '0')} fragment=${index + 1}/${chunks.size}",
+                    )
                 } catch (failure: Throwable) {
                     if (failure is Error) fatal(failure)
                     failClosed(failure)
@@ -225,21 +230,24 @@ class Iap2CsmChannel private constructor(
         fun open(
             underlying: BlockingDuplexByteStream,
             onArtwork: (Iap2ArtworkTransfer) -> Unit = {},
+            onDiagnostic: (String) -> Unit = {},
         ): Iap2CsmChannel =
-            Iap2CsmChannel(Iap2LinkChannel.open(underlying, onArtwork))
+            Iap2CsmChannel(Iap2LinkChannel.open(underlying, onArtwork, onDiagnostic))
 
         /** Opens the owned iAP2 link over an owned wireless RFCOMM stream. */
         fun openWireless(
             underlying: BlockingDuplexByteStream,
             onArtwork: (Iap2ArtworkTransfer) -> Unit = {},
+            onDiagnostic: (String) -> Unit = {},
         ): Iap2CsmChannel =
-            Iap2CsmChannel(Iap2LinkChannel.openWireless(underlying, onArtwork))
+            Iap2CsmChannel(Iap2LinkChannel.openWireless(underlying, onArtwork, onDiagnostic))
 
         /** Opens the owned iAP2 link over an AirPlay type-130 tunnel. */
         fun openTunnel(
             underlying: BlockingDuplexByteStream,
             onArtwork: (Iap2ArtworkTransfer) -> Unit = {},
+            onDiagnostic: (String) -> Unit = {},
         ): Iap2CsmChannel =
-            Iap2CsmChannel(Iap2LinkChannel.openTunnel(underlying, onArtwork))
+            Iap2CsmChannel(Iap2LinkChannel.openTunnel(underlying, onArtwork, onDiagnostic))
     }
 }

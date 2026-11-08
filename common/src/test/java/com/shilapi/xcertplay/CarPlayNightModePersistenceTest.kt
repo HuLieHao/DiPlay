@@ -17,20 +17,20 @@ class CarPlayNightModePersistenceTest {
 
     @Before fun clearPreferences() { prefs.edit().clear().apply() }
 
-    @Test fun freshInstallAndUnknownValuesFollowSystem() {
-        assertEquals(CarPlayNightMode.SYSTEM, AirPlayPersistence.loadCarPlayNightMode(context))
+    @Test fun freshInstallAndUnknownValuesUseVehicleLights() {
+        assertEquals(CarPlayNightMode.VEHICLE, AirPlayPersistence.loadCarPlayNightMode(context))
+        prefs.edit().putString("carplay_night_mode", "system").apply()
+        assertEquals(CarPlayNightMode.VEHICLE, AirPlayPersistence.loadCarPlayNightMode(context))
         prefs.edit().putString("carplay_night_mode", "future-mode").apply()
-        assertEquals(CarPlayNightMode.SYSTEM, AirPlayPersistence.loadCarPlayNightMode(context))
+        assertEquals(CarPlayNightMode.VEHICLE, AirPlayPersistence.loadCarPlayNightMode(context))
     }
 
-    @Test fun thresholdDefaultAndCustomValuePersist() {
-        assertEquals(AmbientLightThreshold(30), AirPlayPersistence.loadAmbientLightThreshold(context))
-        AirPlayPersistence.saveCarPlayNightMode(context, CarPlayNightMode.AMBIENT)
-        AirPlayPersistence.saveAmbientLightThreshold(context, AmbientLightThreshold(200))
-        assertEquals(AmbientLightThreshold(200), AirPlayPersistence.loadAmbientLightThreshold(context))
-        assertEquals(CarPlayNightMode.AMBIENT, AirPlayPersistence.loadCarPlayNightMode(context))
-        AirPlayPersistence.saveAmbientLightThreshold(context, AmbientLightThreshold())
-        assertEquals(AmbientLightThreshold(), AirPlayPersistence.loadAmbientLightThreshold(context))
+    @Test fun removedAmbientModeUsesScheduleAndPreservesItsTimes() {
+        val schedule = CarPlayNightSchedule(19 * 60, 7 * 60)
+        AirPlayPersistence.saveCarPlayNightSchedule(context, schedule)
+        prefs.edit().putString("carplay_night_mode", "ambient").apply()
+        assertEquals(CarPlayNightMode.SCHEDULE, AirPlayPersistence.loadCarPlayNightMode(context))
+        assertEquals(schedule, AirPlayPersistence.loadCarPlayNightSchedule(context))
     }
 
     @Test fun invalidStoredThresholdRestoresTheDefault() {
@@ -42,7 +42,7 @@ class CarPlayNightModePersistenceTest {
 
     @Test fun allModesRoundTripWithoutChangingOtherPreferences() {
         AirPlayPersistence.saveFps(context, 60)
-        for (mode in CarPlayNightMode.entries) {
+        for (mode in CarPlayNightMode.entries.filter { it !in listOf(CarPlayNightMode.AMBIENT, CarPlayNightMode.SYSTEM) }) {
             AirPlayPersistence.saveCarPlayNightMode(context, mode)
             assertEquals(mode, AirPlayPersistence.loadCarPlayNightMode(context))
             assertEquals(60, AirPlayPersistence.loadFps(context))

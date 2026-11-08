@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_capture_stop">Stop collection</string>
+    <string name="settings_capture_stop_first">Please stop collection before saving or downloading the report.</string>
+    <string name="settings_capture_status">Detailed collection · %1$d seconds</string>
+    <string name="settings_capture_hint">Collection starts when the app opens. Stop collection after reproducing the issue, then download the report.</string>
+    <string name="settings_capture_heavy_audio">Heavy audio snapshots and thread scans</string>
+    <string name="settings_capture_heavy_audio_description">Applies during collection. ON collects audio service dumps and thread details. OFF skips them and keeps raw audio events, PCAP and lightweight statistics. A running probe is cancelled; no reconnect is needed.</string>
+</resources>

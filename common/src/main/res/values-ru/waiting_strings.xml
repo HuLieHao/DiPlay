@@ -28,8 +28,6 @@
     <string name="waiting_phase_picture">Изображение</string>
     <string name="waiting_steps_title">Этапы подключения</string>
     <string name="waiting_network_title">Состояние сети</string>
-    <string name="waiting_details_show">Сведения о подключении</string>
-    <string name="waiting_details_hide">Скрыть сведения</string>
     <string name="waiting_current_time">Текущий этап: %1$d с</string>
     <string name="waiting_total_attempt">Всего: %1$d с · Попытка %2$d</string>
     <string name="waiting_duration">%1$.1f с</string>

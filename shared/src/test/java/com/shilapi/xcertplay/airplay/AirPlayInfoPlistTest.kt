@@ -9,8 +9,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AirPlayInfoPlistTest {
+    @Test fun initialNightModeCapabilityIncludesBothDayAndNightValues() {
+        val config = AirPlayConfig(deviceName = "test", deviceId = "02:00:00:00:00:02",
+            btMac = "02:00:00:00:00:01", sourceVersion = "1",
+            main = AirPlayDisplayConfig(widthPixels = 800, heightPixels = 480))
+        assertEquals(true, AirPlayInfoPlist.build(config, true)["nightMode"])
+        assertEquals(false, AirPlayInfoPlist.build(config, false)["nightMode"])
+        assertFalse(AirPlayInfoPlist.build(config).containsKey("nightMode"))
+    }
+
     @Test
-    fun bothDisplaysDeclareAutomaticAppearanceAtConnection() {
+    fun legacyNightModeDoesNotAdvertiseAnUnmaintainedSeparateAppearanceState() {
         val config = AirPlayConfig(
             deviceName = "test", deviceId = "02:00:00:00:00:02", btMac = "02:00:00:00:00:02",
             sourceVersion = "366.0",
@@ -22,7 +31,7 @@ class AirPlayInfoPlistTest {
         for (display in displays) {
             val fields = display as Map<*, *>
             for (key in listOf("uiAppearanceMode", "uiAppearanceSetting", "mapAppearanceMode", "mapAppearanceSetting")) {
-                assertEquals(key, 0, fields[key])
+                assertFalse(key, fields.containsKey(key))
             }
         }
     }

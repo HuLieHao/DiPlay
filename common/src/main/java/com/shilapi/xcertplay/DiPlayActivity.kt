@@ -84,6 +84,7 @@ import com.shilapi.xcertplay.network.WifiP2pChannels
 import com.shilapi.xcertplay.orchestration.ManualHotspotProvisioning
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
 import com.shilapi.xcertplay.orchestration.ManualHotspotValidation
+import com.shilapi.xcertplay.settings.ConnectionSettingsSection
 import com.shilapi.xcertplay.orchestration.MfiTarget
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import com.shilapi.xcertplay.settings.SettingsTheme
@@ -214,8 +215,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var testToneTrack: AudioTrack? = null
     private var toneStop: Runnable? = null
     private var exportButton: Button? = null
-    private var hotspotCaptureButton: Button? = null
-    private var hotspotCaptureInProgress = false
     private var rootScroll: ScrollView? = null
     private var settingsRailScroll: ScrollView? = null
     private var reconnectBar: View? = null
@@ -304,6 +303,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
     private val tick = object : Runnable {
         override fun run() { refreshStatus(); handler.postDelayed(this, 1000) }
+    }
+    private var statusUpdatesResumed = false
+    private var lastReportedConnectionActive: Boolean? = null
+    private val connectionStatusChanged = Runnable {
+        if (statusUpdatesResumed) refreshStatus()
     }
     private val appearancePoll = object : Runnable {
         override fun run() {
@@ -536,6 +540,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             recreate()
             return
         }
+        statusUpdatesResumed = true
+        CarPlayBackgroundSession.observeActive(this) {
+            handler.removeCallbacks(connectionStatusChanged)
+            handler.post(connectionStatusChanged)
+        }
         handler.removeCallbacks(tick); handler.post(tick)
         // Back with the hotspot access now allowed: the start-up attempt that lacked it runs again.
         if (hotspotStartupResult == CarHotspotTethering.Result.PERMISSION_REQUIRED && CarHotspotTethering.permitted(this)) {
@@ -558,6 +567,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
     }
     override fun onPause() {
+        statusUpdatesResumed = false
+        CarPlayBackgroundSession.removeActiveObserver(this)
+        handler.removeCallbacks(connectionStatusChanged)
         appearanceUpdatesResumed = false
         appearanceObserverRemoval?.invoke()
         appearanceObserverRemoval = null
@@ -569,6 +581,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     override fun onDestroy() {
+        statusUpdatesResumed = false
+        CarPlayBackgroundSession.removeActiveObserver(this)
+        handler.removeCallbacks(connectionStatusChanged)
         connectionRequestGeneration++
         settingsSearchPopup?.dismiss()
         appearanceObserverRemoval?.invoke()
@@ -693,7 +708,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         reconnectBar = null
         readinessCard = null
         exportButton = null
-        hotspotCaptureButton = null
         bydAdbControls = null
         adbSwitches.clear()
         adbStatus = null
@@ -984,6 +998,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         disconnectButton = homeButton(getString(R.string.disconnect), false) {
             disconnectButton?.isEnabled = false
             CarPlayBackgroundSession.stop { runOnUiThread { refreshStatus() } }
+            refreshStatus()
+            OwnScreenStart.removeCarPlayTasks(this)
         }.apply { visibility = View.GONE }
         card.addView(disconnectButton, matchButton(if (compact) CONTROL_GAP_DP else 16, if (compact) 46 else 56))
         val right = column().apply { gravity = Gravity.CENTER_HORIZONTAL }
@@ -996,9 +1012,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             gravity = Gravity.CENTER
             addView(logo, LinearLayout.LayoutParams(dp(96), dp(96)))
         }
+        // BuickPlay currently focuses on wireless CarPlay. Keep this home-only block
+        // commented out so the wired entry and its instructions can be restored together.
+        /*
         right.addView(homeButton(getString(R.string.connect_with_usb), false) { connect(false) }, matchButton(height = if (compact) 54 else 68))
         if (!compact) right.addView(label(getString(R.string.plug_your_iphone_into_a_usb_data_port_allow_carplay_when_y), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(10), dp(8), dp(24)) })
         else right.addView(space(16))
+        */
         right.addView(homeButton(getString(R.string.settings), false) { page = "settings"; render() }, matchButton(height = if (compact) 54 else 68))
         if (!compact) right.addView(label(getString(R.string.make_diplay_feel_right_for_your_car), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(24)) })
         else right.addView(space(12))
@@ -1017,7 +1037,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 addView(compactRight, LinearLayout.LayoutParams(0, -2, 1f))
             })
         } else if (!compact && wide) {
-            // Both rows share column widths. The USB button starts at the wireless
+            // Both rows share column widths. The Settings button starts at the wireless
             // card's top edge, independently of hero wrapping or font scaling.
             fun columns(first: View, second: View, stretchSecond: Boolean = false) = row().apply {
                 gravity = Gravity.TOP
@@ -1222,6 +1242,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         setupError = setupError != null,
         active = CarPlayBackgroundSession.active,
         running = CarPlayBackgroundSession.hasSession(),
+        stopping = CarPlayBackgroundSession.isStopping(),
         wireless = AirPlayPersistence.loadWirelessEnabled(this),
         phoneChosen = DiPlayPreferences.phoneAddress(this) != null,
         hotspotSetupNeeded = AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL &&
@@ -1236,6 +1257,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         card.removeAllViews()
         val title = getString(when (state) {
             SettingsReadiness.SETUP_ERROR, SettingsReadiness.HOTSPOT_SETUP -> R.string.setup_needs_attention
+            SettingsReadiness.STOPPING -> R.string.disconnecting_carplay
             SettingsReadiness.CONNECTED -> R.string.carplay_connected
             SettingsReadiness.CONNECTING -> R.string.connecting_to_your_iphone
             SettingsReadiness.CHOOSE_IPHONE -> R.string.settings_choose_iphone_title
@@ -1244,6 +1266,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         val detail = when (state) {
             SettingsReadiness.SETUP_ERROR -> setupError.orEmpty()
             SettingsReadiness.HOTSPOT_SETUP -> getString(R.string.save_the_name_and_password_from_the_car_s_hotspot_settings)
+            SettingsReadiness.STOPPING -> getString(R.string.disconnecting_carplay)
             SettingsReadiness.CONNECTED -> getString(R.string.settings_ready_connected)
             SettingsReadiness.CONNECTING -> getString(R.string.settings_connecting_description)
             SettingsReadiness.CHOOSE_IPHONE -> getString(R.string.settings_choose_iphone_description)
@@ -1337,8 +1360,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         renderSections(content, SettingsInformationArchitecture.sectionsByCategory.getValue(SettingsCategory.DISPLAY))
     }
 
-    private fun nightModeLabels() = CarPlayNightMode.entries.map { mode ->
+    private fun availableNightModes() = CarPlayNightMode.entries.filter {
+        it != CarPlayNightMode.AMBIENT && it != CarPlayNightMode.SYSTEM
+    }
+
+    private fun nightModeLabels(modes: List<CarPlayNightMode> = availableNightModes()) = modes.map { mode ->
         getString(when (mode) {
+            CarPlayNightMode.VEHICLE -> R.string.carplay_night_vehicle
             CarPlayNightMode.SYSTEM -> R.string.carplay_night_system
             CarPlayNightMode.AMBIENT -> R.string.carplay_night_ambient
             CarPlayNightMode.DAY -> R.string.carplay_night_day
@@ -1348,9 +1376,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private fun appearanceControl(parent: LinearLayout) {
-        val modes = CarPlayNightMode.entries
+        val modes = availableNightModes()
         choice(parent, getString(R.string.carplay_night_mode), nightModeLabels(),
-            modes.indexOf(AirPlayPersistence.loadCarPlayNightMode(this)), reconnects = false) { index ->
+            modes.indexOf(AirPlayPersistence.loadCarPlayNightMode(this)), reconnects = false, contentHeight = true) { index ->
             AirPlayPersistence.saveCarPlayNightMode(this, modes[index])
         }
     }
@@ -1701,18 +1729,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private fun clockSettings(card: LinearLayout) {
-        choice(card, getString(R.string.settings_clock),
-            listOf(getString(R.string.settings_clock_off), getString(R.string.settings_clock_left), getString(R.string.settings_clock_right)),
-            CarPlayClockSettings.positions.indexOf(CarPlayClockSettings.position(this)), reconnects = false, adaptiveHeight = true) {
-            CarPlayClockSettings.save(this, position = CarPlayClockSettings.positions[it])
-        }
         choice(card, getString(R.string.settings_clock_size), CarPlayClockSettings.sizes.map { "${it * 5}%" },
             CarPlayClockSettings.sizes.indexOf(CarPlayClockSettings.size(this)).coerceAtLeast(0), reconnects = false, adaptiveHeight = true) {
             CarPlayClockSettings.save(this, size = CarPlayClockSettings.sizes[it])
         }
-        card.addView(label(getString(R.string.settings_clock_description), 14, MUTED).apply {
-            setPadding(0, dp(SETTINGS_BLOCK_GAP_DP), 0, dp(SETTINGS_BLOCK_GAP_DP))
-        })
     }
 
     private fun allSettingsSections(content: LinearLayout) {
@@ -1739,37 +1759,59 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             card.addView(space(12))
             // Also here, not only in the CarPlay menu: with the CH341 removed CarPlay cannot connect,
             // so that menu could not be reached to switch back (#696).
-            val mfiTargets = listOf(MfiTarget.LOCAL, MfiTarget.USB_CH341)
             val storedMfiTarget = AirPlayPersistence.loadMfiTarget(this)
+            val mfiOptions = ConnectionSettingsSection.mfiOptions(this, storedMfiTarget)
+            val mfiTargets = mfiOptions.map { it.first }
             if (storedMfiTarget in mfiTargets) {
-                choice(card, getString(R.string.mfi_certificate_signing_target), listOf(
-                    getString(R.string.local_offline),
-                    getString(R.string.usb_ch341),
-                ), mfiTargets.indexOf(storedMfiTarget)) { index ->
+                choice(card, getString(R.string.mfi_certificate_signing_target), mfiOptions.map { it.second },
+                    mfiTargets.indexOf(storedMfiTarget), reconnects = false, contentHeight = true) { index ->
                     val target = mfiTargets[index]
+                    if (target == MfiTarget.I2C && ConnectionSettingsSection.boardMfiAvailable(this)) {
+                        AirPlayPersistence.saveMfiI2cPath(this, ConnectionSettingsSection.BOARD_MFI_PATH)
+                    }
                     AirPlayPersistence.saveMfiTarget(this, target)
                     setupError = runCatching { DiPlayBootstrap.ensure(this, target) }.exceptionOrNull()?.let {
                         android.util.Log.e("DiPlaySetup", "CarPlay authentication could not be loaded", it)
                         getString(R.string.setup_error_auth)
                     }
+                    markReconnectNeeded()
                 }
-                card.addView(label(getString(R.string.settings_mfi_target_description), 14, MUTED))
+                if (MfiTarget.I2C in mfiTargets) {
+                    card.addView(label(getString(R.string.settings_board_mfi_description), 14, MUTED))
+                } else {
+                    card.addView(label(getString(R.string.settings_mfi_target_description), 14, MUTED))
+                }
             }
         }
         filteredSection(content, SettingsSection.DIAGNOSTICS,
             getString(R.string.diagnostics), R.drawable.ic_dp_diagnostics) { card ->
-            hotspotCaptureButton = button(getString(if (hotspotCaptureInProgress)
-                R.string.settings_hotspot_capture_working else R.string.settings_hotspot_capture), false) {
-                captureHotspotDiagnostics()
-            }.apply { isEnabled = !hotspotCaptureInProgress }
-            card.addView(hotspotCaptureButton, matchButton(CONTROL_GAP_DP, CONTROL_HEIGHT_DP))
-            card.addView(label(getString(R.string.settings_hotspot_capture_description), 14, MUTED))
+            val captureStatus = label(getString(R.string.settings_capture_status, StartupCapture.durationSeconds()) + "\n" + StartupCapture.health(), 14, MUTED)
+            val stopCapture = button(getString(R.string.settings_capture_stop), false) { StartupCapture.stop() }.apply { isEnabled = StartupCapture.needsStop() }
+            card.addView(label(getString(R.string.settings_capture_hint), 14, MUTED))
+            toggle(card, getString(R.string.settings_capture_heavy_audio),
+                getString(R.string.settings_capture_heavy_audio_description), StartupCapture.heavyAudioSnapshots(this)) {
+                StartupCapture.setHeavyAudioSnapshots(this, it)
+            }
+            card.addView(captureStatus)
+            card.addView(stopCapture, matchButton(CONTROL_GAP_DP, CONTROL_HEIGHT_DP))
+            val refresh = object : Runnable {
+                override fun run() {
+                    if (isDestroyed || !captureStatus.isAttachedToWindow) return
+                    captureStatus.text = getString(R.string.settings_capture_status, StartupCapture.durationSeconds()) + "\n" + StartupCapture.health()
+                    stopCapture.isEnabled = StartupCapture.needsStop()
+                    captureStatus.postDelayed(this, 1000)
+                }
+            }
+            captureStatus.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) { view.post(refresh) }
+                override fun onViewDetachedFromWindow(view: View) { view.removeCallbacks(refresh) }
+            })
             exportButton = button(if (exportInProgress) getString(R.string.saving_report) else getString(R.string.save_diagnostic_report), false) {
                 saveReportToDownloads()
             }.apply { isEnabled = !exportInProgress }
             card.addView(exportButton, matchButton(10, 60))
             card.addView(button(getString(R.string.choose_save_location), false) { chooseReportDestination() }, matchButton(10, 60))
-            card.addView(button(getString(R.string.settings_report_on_phone), false) { openBackup(SettingsCategory.DIAGNOSTICS) }, matchButton(10, 60))
+            card.addView(button(getString(R.string.settings_report_on_phone), false) { if (StartupCapture.needsStop()) toast(getString(R.string.settings_capture_stop_first)) else openBackup(SettingsCategory.DIAGNOSTICS) }, matchButton(10, 60))
             val destination = getString(R.string.reports_save_to_downloads_diplay)
             card.addView(label(destination + getString(R.string.settings_diagnostic_report_raw_content_hint), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
             toggle(card, getString(R.string.settings_fps_counter), getString(R.string.settings_fps_counter_description),
@@ -1869,11 +1911,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 handler.post { checkForAppearanceChange() }
             }
             card.addView(label(getString(R.string.settings_app_appearance_description), 14, MUTED))
-            val nightModes = CarPlayNightMode.entries
+            val nightModes = availableNightModes()
             val nightMode = AirPlayPersistence.loadCarPlayNightMode(this)
-            val ambientControls = column().apply {
-                visibility = if (nightMode == CarPlayNightMode.AMBIENT) View.VISIBLE else View.GONE
-            }
             val scheduleControls = column().apply {
                 visibility = if (nightMode == CarPlayNightMode.SCHEDULE) View.VISIBLE else View.GONE
             }
@@ -1882,26 +1921,34 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 getString(R.string.carplay_night_mode),
                 nightModeLabels(),
                 nightModes.indexOf(nightMode),
-                reconnects = false,
+                reconnects = false, contentHeight = true,
             ) { index ->
                 AirPlayPersistence.saveCarPlayNightMode(this, nightModes[index])
-                ambientControls.visibility = if (nightModes[index] == CarPlayNightMode.AMBIENT) View.VISIBLE else View.GONE
                 scheduleControls.visibility = if (nightModes[index] == CarPlayNightMode.SCHEDULE) View.VISIBLE else View.GONE
                 handler.post(::checkForAppearanceChange)
             }
+            card.addView(label(getString(R.string.carplay_night_vehicle_hint), 14, MUTED))
+            val lastNightResult = NightModeLastResult.value
+            val lastNightText = if (lastNightResult == null) getString(R.string.carplay_night_no_result) else {
+                val (night, source) = lastNightResult
+                val sourceText = getString(when (source) {
+                    "vehicle" -> R.string.carplay_night_vehicle
+                    "vehicle_default_day" -> R.string.carplay_night_vehicle_fallback
+                    "schedule" -> R.string.carplay_night_schedule
+                    "day" -> R.string.carplay_night_day
+                    "night" -> R.string.carplay_night_night
+                    "ambient" -> R.string.carplay_night_ambient
+                    else -> R.string.carplay_night_system
+                })
+                getString(R.string.carplay_night_last_result,
+                    getString(if (night) R.string.carplay_night_night else R.string.carplay_night_day), sourceText)
+            }
+            card.addView(label(lastNightText, 14, MUTED))
             val sentenceSeparator = if (resources.configuration.locales[0].language == "zh") "" else " "
             card.addView(label(getString(R.string.carplay_night_hint) + sentenceSeparator +
                 getString(R.string.carplay_night_time_note), 14, MUTED).apply {
                 setPadding(0, 0, 0, dp(18))
             })
-            ambientControls.addView(label(getString(R.string.carplay_night_ambient_hint), 14, MUTED).apply {
-                setPadding(0, 0, 0, dp(18))
-            })
-            ambientLightThresholdControl(ambientControls)
-            nightDelaySettingControl(ambientControls, R.string.ambient_delay_title, R.string.ambient_delay_hint,
-                0..60, 2, R.string.ambient_delay_summary, { AirPlayPersistence.loadAmbientDelaySeconds(this) },
-                save = { AirPlayPersistence.saveAmbientDelaySeconds(this, it) })
-            card.addView(ambientControls)
             scheduleControls.addView(label(getString(R.string.carplay_night_schedule_hint), 14, MUTED).apply {
                 setPadding(0, 0, 0, dp(18))
             })
@@ -2541,7 +2588,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 page = backupPageHtml(),
                 export = { SettingsBackupCodec.export(this, version()) },
                 import = { SettingsBackupCodec.import(this, it) },
-                archiveReport = { selection -> diagnosticReportFile(applicationContext, selection) },
+                archiveStream = { selection, output ->
+                    run {
+                        if (StartupCapture.needsStop()) throw com.shilapi.xcertplay.backup.ReportCollectionActiveException(getString(R.string.settings_capture_stop_first))
+                        val metadata = buildString { writeDiagnosticReport(applicationContext, this, includeOriginalLogs = false) }
+                        DiagnosticArchive.forLogs(File(applicationContext.filesDir, "logs")).exportTo(output, selection, metadata)
+                    }
+                },
                 archiveSessions = { DiagnosticArchive.forLogs(File(applicationContext.filesDir, "logs")).sessions().joinToString("\n") { (id, description) -> "$id\t$description" } },
                 codePage = assets.open("settings-code.html").use { it.readBytes() },
             )
@@ -5843,16 +5896,27 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     private fun refreshStatus() {
         val running = CarPlayBackgroundSession.hasSession()
+        val active = CarPlayBackgroundSession.active
         // A USB session shares this card's status and Disconnect, but not its wireless title or Wi-Fi hint (#742).
         val wired = HomeCardTransport.wired(running, AirPlayPersistence.loadWirelessEnabled(this))
         homeCardTitle?.text = getString(if (wired) R.string.home_usb_carplay else R.string.wireless_carplay)
         homeConnectionHint?.visibility = if (wired) View.GONE else View.VISIBLE
+        val stopping = CarPlayBackgroundSession.isStopping()
         status?.text = when {
+            stopping -> getString(R.string.disconnecting_carplay)
             setupError != null -> getString(R.string.setup_needs_attention)
-            CarPlayBackgroundSession.active -> getString(R.string.carplay_connected)
+            active -> getString(R.string.carplay_connected)
             running -> getString(R.string.connecting_to_your_iphone)
             DiPlayPreferences.phoneAddress(this) != null -> "${getString(R.string.status_ready_for_prefix)}${DiPlayPreferences.phoneName(this)}"
             else -> getString(R.string.ready_when_you_are)
+        }
+        if (status != null && lastReportedConnectionActive != active) {
+            lastReportedConnectionActive = active
+            val age = (android.os.SystemClock.uptimeMillis() - CarPlayBackgroundSession.activeChangedAtUptimeMillis)
+                .coerceAtLeast(0)
+            val message = "HOME_CONNECTION_STATUS active=$active resumed=$statusUpdatesResumed stateAgeMs=$age"
+            Log.i("DiPlay", message)
+            AsyncDiagnosticLog.append(CarPlayBackgroundSession.snapshot()?.diagnosticLog, message)
         }
         if (lastRunning != running) {
             connectButton?.text = if (running) getString(R.string.open_carplay) else getString(R.string.connect_phone)
@@ -5860,7 +5924,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             disconnectButton?.isEnabled = true
             lastRunning = running
         }
-        connectButton?.isEnabled = setupError == null
+        disconnectButton?.isEnabled = !stopping
+        connectButton?.isEnabled = setupError == null && !stopping
         refreshReconnectBar()
         refreshReadiness()
     }
@@ -5880,27 +5945,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 }
             }
         }, "adb-cluster-authorize").start()
-    }
-
-    private fun captureHotspotDiagnostics() {
-        if (hotspotCaptureInProgress) return
-        hotspotCaptureInProgress = true
-        hotspotCaptureButton?.apply { isEnabled = false; text = getString(R.string.settings_hotspot_capture_working) }
-        val app = applicationContext
-        Thread({
-            val result = runCatching { HotspotNetworkDiagnostics.collect(app) }
-                .getOrDefault(HotspotNetworkDiagnostics.Outcome.FAILED)
-            runOnUiThread {
-                hotspotCaptureInProgress = false
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                hotspotCaptureButton?.apply { isEnabled = true; text = getString(R.string.settings_hotspot_capture) }
-                toast(getString(when (result) {
-                    HotspotNetworkDiagnostics.Outcome.SAVED -> R.string.settings_hotspot_capture_saved
-                    HotspotNetworkDiagnostics.Outcome.BUSY -> R.string.settings_hotspot_capture_busy
-                    HotspotNetworkDiagnostics.Outcome.FAILED -> R.string.settings_hotspot_capture_failed
-                }))
-            }
-        }, "buickplay-hotspot-diagnostics").start()
     }
 
     private fun reportFileName() = "DiPlay-${SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())}.zip"
@@ -5923,7 +5967,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }.setNegativeButton(getString(R.string.close), null).show()
     }
 
-    private fun saveReportToDownloads() = chooseDiagnosticSelection { saveSelectedReportToDownloads() }
+    private fun saveReportToDownloads() {
+        if (StartupCapture.needsStop()) { toast(getString(R.string.settings_capture_stop_first)); return }
+        chooseDiagnosticSelection { saveSelectedReportToDownloads() }
+    }
 
     private fun saveSelectedReportToDownloads() {
         if (exportInProgress) return
@@ -5933,7 +5980,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         } else exportDiagnostics()
     }
 
-    private fun chooseReportDestination() = chooseDiagnosticSelection { chooseSelectedReportDestination() }
+    private fun chooseReportDestination() {
+        if (StartupCapture.needsStop()) { toast(getString(R.string.settings_capture_stop_first)); return }
+        chooseDiagnosticSelection { chooseSelectedReportDestination() }
+    }
 
     private fun chooseSelectedReportDestination() {
         // Some head units omit or disable DocumentsUI. Launch itself can throw, before
@@ -6004,6 +6054,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private fun diagnosticReportFile(appContext: Context, selection: String = "all"): File {
+        if (StartupCapture.needsStop()) throw com.shilapi.xcertplay.backup.ReportCollectionActiveException(getString(R.string.settings_capture_stop_first))
         val info = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
         val code = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info)
         val directory = File(appContext.cacheDir, "archive-reports")
@@ -6028,6 +6079,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine("Diagnostic writer flush: ${if (pendingFlushed) "completed" else "timed_out; pending tail may be missing"}")
         appendLine("Export consistency: archive ZIP uses pinned fixed byte prefixes; diagnostics describe live state")
         appendLine(DiagnosticBuildInfo.report(appContext))
+        appendLine(StartupCapture.report())
         appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
         appendLine("Head unit: ${Build.MANUFACTURER} ${Build.MODEL}")
         appendLine("Connection: ${if (AirPlayPersistence.loadWirelessEnabled(appContext)) "wireless" else "USB"}")
@@ -6046,6 +6098,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine("Head-unit board: ${Build.BOARD}; hardware: ${Build.HARDWARE}; build: ${Build.DISPLAY}")
         appendLine()
         appendLine(BluetoothDiagnosticSnapshot.report(appContext))
+        appendLine()
+        appendLine(CarPlayClockOverlay.diagnosticReport())
         appendLine()
         appendLine("--- Current cluster display diagnostics (even when disabled) ---")
         appendLine(ClusterMapPresentation.diagnosticReport(appContext))
@@ -6518,10 +6572,14 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     // [announcesReconnect] labels a choice whose [save] reconnects by itself.
     private fun choice(parent: LinearLayout, title: String, options: List<String>, current: Int, reconnects: Boolean = true,
-        announcesReconnect: Boolean = reconnects, enabled: Boolean = true, adaptiveHeight: Boolean = false, save: (Int) -> Unit) {
+        announcesReconnect: Boolean = reconnects, enabled: Boolean = true, adaptiveHeight: Boolean = false, contentHeight: Boolean = false, save: (Int) -> Unit) {
         var selection = current
         val button = button("$title · ${options[selection]}", false) {}.apply {
             isEnabled = enabled
+            if (contentHeight) {
+                tag = CONTENT_CONTROL_TAG
+                minimumHeight = dp(CONTROL_HEIGHT_DP)
+            }
             if (adaptiveHeight) {
                 tag = ADAPTIVE_CONTROL_TAG
                 minimumHeight = dp(CONTROL_HEIGHT_DP)
@@ -6544,6 +6602,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
         parent.addView(button, matchButton(0, CONTROL_HEIGHT_DP).apply {
             if (adaptiveHeight) height = adaptiveControlHeight()
+            if (contentHeight) height = ViewGroup.LayoutParams.WRAP_CONTENT
         }); parent.addView(space(CONTROL_GAP_DP))
     }
     private fun adaptiveControlHeight() =
@@ -6811,7 +6870,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             val lp = child.layoutParams as? LinearLayout.LayoutParams ?: continue
             when {
                 child is Button -> {
-                    lp.height = if (child.tag == ADAPTIVE_CONTROL_TAG) adaptiveControlHeight() else dp(CONTROL_HEIGHT_DP); lp.topMargin = 0
+                    lp.height = when (child.tag) {
+                        CONTENT_CONTROL_TAG -> ViewGroup.LayoutParams.WRAP_CONTENT
+                        ADAPTIVE_CONTROL_TAG -> adaptiveControlHeight()
+                        else -> dp(CONTROL_HEIGHT_DP)
+                    }
+                    lp.topMargin = 0
                     lp.bottomMargin = dp(if (isNote(next)) NOTE_ATTACH_GAP_DP else CONTROL_GAP_DP)
                 }
                 // Toggle rows carried their own vertical padding, which doubled the gap after a button.
@@ -7000,6 +7064,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         private const val VALUE_SEPARATOR = " · "
         private const val SEARCH_HIGHLIGHT_MILLIS = 900L
         private const val SPACER = "spacer"
+        private const val CONTENT_CONTROL_TAG = "settings-content-control"
         private const val ADAPTIVE_CONTROL_TAG = "settings-adaptive-control"
         private const val CONTROL_HEIGHT_DP = 60
         private const val CONTROL_GAP_DP = 12

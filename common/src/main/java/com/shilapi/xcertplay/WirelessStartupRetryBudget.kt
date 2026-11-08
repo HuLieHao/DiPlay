@@ -8,9 +8,17 @@ internal class WirelessStartupRetryBudget {
     private var frameSession: Any? = null
     private var firstFrameMillis = 0L
 
-    fun nextDelayMillis(): Long? {
+    fun nextDelayMillis(
+        fastWireless: Boolean = false,
+        failure: com.shilapi.xcertplay.network.WirelessStartupFailure? = null,
+    ): Long? {
         if (retries >= WirelessStartupPolicy.MAX_STARTUP_RETRIES) return null
-        return (2_000L * (1L shl retries++)).coerceAtMost(30_000L)
+        val retry = retries++
+        if (fastWireless && failure == com.shilapi.xcertplay.network.WirelessStartupFailure.FIRST_TCP_TIMEOUT) {
+            val nominal = if (retry == 0) 2_000L else 4_000L
+            return nominal - WirelessStartupPolicy.FIRST_TCP_GRACE_MILLIS
+        }
+        return (2_000L * (1L shl retry)).coerceAtMost(30_000L)
     }
 
     fun firstFrame(session: Any, nowMillis: Long): Boolean {

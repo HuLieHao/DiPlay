@@ -39,13 +39,23 @@ class CarPlayConnectionDiagnosticLogTest {
         }
     }
 
-    @Test fun oldTeardownEvidenceSurvivesWithoutAcceptingOtherOldControllerLogs() {
+    @Test fun oldControllerEvidenceSurvivesWithoutChangingCurrentController() {
         listener.onDebugLog("${CarPlayController.CONNECTION_DIAGNOSTIC_PREFIX} attempt=1 phase=CONTROL teardown end elapsedMs=117 executorTerminated=true")
         listener.onDebugLog("old controller ordinary state")
         assertTrue(AsyncDiagnosticLog.awaitIdle(2_000))
         assertTrue(log.contains("teardown end elapsedMs=117"))
-        assertFalse(log.contains("old controller ordinary state"))
+        assertTrue(log.contains("old controller ordinary state"))
         assertEquals(2, activity.javaClass.getDeclaredField("restartGeneration").apply { isAccessible = true }.get(activity))
+    }
+
+    @Test fun ordinaryEndpointAndProtocolLogsAreArchivedExactlyOnceWithMenuOpen() {
+        activity.javaClass.getDeclaredField("restartGeneration").apply { isAccessible = true }.set(activity, 1)
+        activity.javaClass.getDeclaredField("menuOpen").apply { isAccessible = true }.set(activity, true)
+        listener.onDebugLog("airplay TCP accepted family=IPv4 peer=/192.168.245.71:12345")
+        listener.onDebugLog("IAP2 TX wirelessIP=192.168.245.5")
+        assertTrue(AsyncDiagnosticLog.awaitIdle(2_000))
+        assertEquals(1, log.lineSequence().count { it.contains("peer=/192.168.245.71:12345") })
+        assertEquals(1, log.lineSequence().count { it.contains("IAP2 TX wirelessIP=192.168.245.5") })
     }
 
     @Test fun connectionDiagnosticLogRetainsOriginalCredentialText() {

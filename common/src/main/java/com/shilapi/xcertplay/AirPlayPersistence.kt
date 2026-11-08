@@ -277,7 +277,7 @@ object AirPlayPersistence {
     }
 
     fun loadMediaAudioChannel(context: Context): Int =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        CarSetupDefaults.initialize(context)
             .getInt(KEY_MEDIA_AUDIO_CHANNEL, 0)
             .takeIf { it in AUDIO_CHANNELS } ?: 0
 
@@ -288,7 +288,7 @@ object AirPlayPersistence {
     }
 
     fun loadNavigationAudioChannel(context: Context): Int {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs = CarSetupDefaults.initialize(context)
         // Inherit the legacy value only when the new key is absent; preserve fresh-install and explicit 0 defaults.
         return prefs.getInt(KEY_NAVIGATION_AUDIO_CHANNEL, prefs.getInt(KEY_NAVIGATION_STREAM_TYPE, 0))
             .takeIf { it in AUDIO_CHANNELS } ?: 0
@@ -316,7 +316,7 @@ object AirPlayPersistence {
     /** Applies a nonzero setup-guide default only when no current or legacy choice exists. */
     fun applySetupNavigationAudioChannelDefault(context: Context, channel: Int): Boolean {
         if (channel !in AUDIO_CHANNELS || channel == 0) return false
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs = CarSetupDefaults.initialize(context)
         if (prefs.contains(KEY_NAVIGATION_AUDIO_CHANNEL) || prefs.contains(KEY_NAVIGATION_STREAM_TYPE)) return false
         prefs.edit()
             .putInt(KEY_NAVIGATION_AUDIO_CHANNEL, channel)
@@ -325,7 +325,7 @@ object AirPlayPersistence {
     }
 
     fun loadWirelessEnabled(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        CarSetupDefaults.initialize(context)
             .getBoolean(KEY_WIRELESS_ENABLED, true)
 
     fun saveWirelessEnabled(context: Context, enabled: Boolean) {
@@ -380,8 +380,11 @@ object AirPlayPersistence {
             .apply()
     }
 
+    private fun hotspotPreferences(context: Context): android.content.SharedPreferences =
+        CarSetupDefaults.initialize(context)
+
     fun loadWirelessHotspotMode(context: Context): WirelessHotspotMode {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs = hotspotPreferences(context)
         val stored = prefs.getString(KEY_WIRELESS_HOTSPOT_MODE, null)
         val mode = WirelessHotspotMode.entries.firstOrNull { it.name == stored }
             ?: WirelessHotspotMode.MANUAL
@@ -392,7 +395,7 @@ object AirPlayPersistence {
 
     fun saveWirelessHotspotMode(context: Context, mode: WirelessHotspotMode) {
         val supported = if (mode == WirelessHotspotMode.LOCAL_ONLY_HOTSPOT) WirelessHotspotMode.MANUAL else mode
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        hotspotPreferences(context).edit()
             .putString(KEY_WIRELESS_HOTSPOT_MODE, supported.name)
             .apply()
     }
@@ -433,53 +436,53 @@ object AirPlayPersistence {
     }
 
     fun loadManualHotspotSsid(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        hotspotPreferences(context)
             .getString(KEY_MANUAL_HOTSPOT_SSID, null)
             .orEmpty()
 
     fun saveManualHotspotSsid(context: Context, ssid: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        hotspotPreferences(context).edit()
             .putString(KEY_MANUAL_HOTSPOT_SSID, ssid)
             .apply()
     }
 
     fun loadManualHotspotPassphrase(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        hotspotPreferences(context)
             .getString(KEY_MANUAL_HOTSPOT_PASSPHRASE, null)
             .orEmpty()
 
     fun saveManualHotspotPassphrase(context: Context, passphrase: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        hotspotPreferences(context).edit()
             .putString(KEY_MANUAL_HOTSPOT_PASSPHRASE, passphrase)
             .apply()
     }
 
     fun loadManualHotspotBand(context: Context): ManualHotspotBand {
-        val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val stored = hotspotPreferences(context)
             .getString(KEY_MANUAL_HOTSPOT_BAND, null)
         return ManualHotspotBand.entries.firstOrNull { it.name == stored }
             ?: ManualHotspotBand.AUTO
     }
 
     fun saveManualHotspotBand(context: Context, band: ManualHotspotBand) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        hotspotPreferences(context).edit()
             .putString(KEY_MANUAL_HOTSPOT_BAND, band.name)
             .apply()
     }
 
     fun loadManualHotspotChannel(context: Context): Int =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        hotspotPreferences(context)
             .getInt(KEY_MANUAL_HOTSPOT_CHANNEL, 0)
             .coerceIn(0, 196)
 
     fun saveManualHotspotChannel(context: Context, channel: Int) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        hotspotPreferences(context).edit()
             .putInt(KEY_MANUAL_HOTSPOT_CHANNEL, channel.coerceIn(0, 196))
             .apply()
     }
 
     fun loadManualHotspotSecurity(context: Context): ManualHotspotSecurity {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs = hotspotPreferences(context)
         val stored = prefs.getString(KEY_MANUAL_HOTSPOT_SECURITY, null)
         return ManualHotspotSecurity.entries.firstOrNull { it.name == stored }
             ?: if (loadManualHotspotPassphrase(context).isEmpty()) {
@@ -490,19 +493,19 @@ object AirPlayPersistence {
     }
 
     fun saveManualHotspotSecurity(context: Context, security: ManualHotspotSecurity) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        hotspotPreferences(context).edit()
             .putString(KEY_MANUAL_HOTSPOT_SECURITY, security.name)
             .apply()
     }
 
     /** Interface that carries the car hotspot when the platform does not report it as a Wi-Fi AP. */
     fun loadManualHotspotInterface(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        hotspotPreferences(context)
             .getString(KEY_MANUAL_HOTSPOT_INTERFACE, null)
             .orEmpty()
 
     fun saveManualHotspotInterface(context: Context, interfaceName: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        hotspotPreferences(context).edit()
             .putString(KEY_MANUAL_HOTSPOT_INTERFACE, interfaceName.trim())
             .apply()
     }
@@ -638,8 +641,14 @@ object AirPlayPersistence {
     }
 
     fun loadCarPlayNightMode(context: Context): CarPlayNightMode = CarPlayNightMode.fromKey(
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_CARPLAY_NIGHT_MODE, null),
-    )
+        CarSetupDefaults.initialize(context).getString(KEY_CARPLAY_NIGHT_MODE, null),
+    ).let {
+        when (it) {
+            CarPlayNightMode.AMBIENT -> CarPlayNightMode.SCHEDULE
+            CarPlayNightMode.SYSTEM -> CarPlayNightMode.VEHICLE
+            else -> it
+        }
+    }
 
     fun saveCarPlayNightMode(context: Context, mode: CarPlayNightMode) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()

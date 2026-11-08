@@ -28,9 +28,9 @@ object AirPlayInfoPlist {
     fun features(config: AirPlayConfig): Long =
         if (config.disableAudioOutput) CARPLAY_FEATURES_NO_AUDIO else CARPLAY_FEATURES
 
-    fun build(config: AirPlayConfig): Map<String, Any?> {
+    fun build(config: AirPlayConfig, appearanceNight: Boolean? = null): Map<String, Any?> {
         val displays = arrayListOf<Any?>(
-            displayEntry(config.main, STREAM_TYPE_MAIN_SCREEN, MAIN_UUID),
+            displayEntry(config.main, STREAM_TYPE_MAIN_SCREEN, MAIN_UUID, appearanceNight),
         )
         config.cluster?.let { displays.add(displayEntry(it, STREAM_TYPE_ALT_SCREEN, ALT_UUID)) }
 
@@ -48,6 +48,7 @@ object AirPlayInfoPlist {
             "keepAliveSendStatsAsBody" to false,
             "modes" to modes(),
         )
+        if (appearanceNight != null) info["nightMode"] = appearanceNight
         if (!config.disableAudioOutput) {
             info["audioLatencies"] = audioLatencies()
             info["audioFormats"] = audioFormats(config.entertainmentSampleRate, config.microphone, config.mainBufferedAudio, config.microphoneOpus,
@@ -187,7 +188,7 @@ object AirPlayInfoPlist {
         ),
     )
 
-    private fun displayEntry(display: AirPlayDisplayConfig, type: Int, uuid: String): Map<String, Any?> {
+    private fun displayEntry(display: AirPlayDisplayConfig, type: Int, uuid: String, appearanceNight: Boolean? = null): Map<String, Any?> {
         val widthPhysical = AirPlayDisplaySettings.sanitizeReportedPhysicalMm(
             display.widthPhysicalMm ?: AirPlayDisplaySettings.DEFAULT_WIDTH_PHYSICAL_MM,
         )
@@ -209,12 +210,14 @@ object AirPlayInfoPlist {
             "heightPhysical" to heightPhysical,
             "features" to (display.features ?: (DISPLAY_FEATURE_HIGH_FIDELITY_TOUCH or DISPLAY_FEATURE_KNOBS)),
             "primaryInputDevice" to display.primaryInputDevice,
-            // Declare automatic UI/map appearance before runtime setNightMode commands.
-            "uiAppearanceMode" to 0,
-            "uiAppearanceSetting" to 0,
-            "mapAppearanceMode" to 0,
-            "mapAppearanceSetting" to 0,
+
         )
+
+        if (appearanceNight != null) {
+            // Presence enables iOS uiAppearanceUpdate handling; value is the current host decision.
+            entry["uiAppearanceMode"] = if (appearanceNight) 1 else 0
+            entry["uiAppearanceSetting"] = 1
+        }
 
         // Several areas let the car move CarPlay between them (another dock edge, the head unit's split
         // screen) with updateViewArea, without reconnecting.

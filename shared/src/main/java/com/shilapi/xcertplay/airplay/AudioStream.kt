@@ -92,6 +92,10 @@ class AudioStream(
         // When the head unit opens its 360° camera, default-priority audio threads wait behind it (#737).
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO) }
         val stats = StreamReceiveStats("audio type=$streamType", onDiagnostic)
+        // Captured type-101 navigation traffic contains exact UDP duplicates, but no
+        // recoverable reordering. Do not spend its 80 ms latency budget waiting for missing audio.
+        val duplicateFilter = if (streamType == 101) AudioRtpDuplicateFilter() else null
+        var duplicatePackets = 0
         val buffer = ByteArray(DATAGRAM_BYTES)
         try {
             while (!closed.get()) {
@@ -168,6 +172,12 @@ class AudioStream(
                     )
                 }
                 listener.onPacket(wire, rtp, sample, null)
+                if (closed.get()) return
+                if (duplicateFilter?.accept(rtp, System.nanoTime()) == false) {
+                    duplicatePackets++
+                    stats.processed()
+                    continue
+                }
                 if (!started) {
                     started = true
                     listener.onStarted(sample)
@@ -175,7 +185,13 @@ class AudioStream(
                 listener.onRtp(rtp, sample)
                 stats.processed()
             }
-        } finally { stats.flush(ended = true) }
+        } finally {
+            duplicateFilter?.clear()
+            if (duplicateFilter != null) {
+                onDiagnostic("Audio RTP delivery type=$streamType exactDuplicatesSuppressed=$duplicatePackets gapRecovery=none addedWaitMs=0")
+            }
+            stats.flush(ended = true)
+        }
     }
 
     private fun runControl(socket: DatagramSocket) {

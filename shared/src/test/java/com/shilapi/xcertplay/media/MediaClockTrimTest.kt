@@ -244,6 +244,64 @@ class MediaClockTrimTest {
         assertNull(trim.rateDue(500_000_000L))
     }
 
+    @Test fun crossingTheCompressedBacklogThresholdCannotBypassTheRateUpdateInterval() {
+        val trim = MediaClockTrim(48_000, 14_400, -0.0075)
+        trim.sample(7_200, 0, 15_360)
+        assertEquals(47_640, trim.rateDue(0))
+        for (step in 1..150) {
+            val now = step * 20_000_000L
+            trim.sample(7_200, now, if (step % 2 == 0) 15_360 else 14_336)
+            // A packet crossing the boundary is not permission to retune every 20 ms.
+            assertNull("threshold crossing $step", trim.rateDue(now))
+            assertEquals(47_640, trim.rate)
+            assertEquals(-0.0075, trim.snapshot(now).integral, 0.0)
+        }
+    }
+
+    @Test fun theFirstDecoderRecoveryPeakDoesNotImmediatelyAccelerateOrLearn() {
+        val trim = MediaClockTrim(48_000, 14_400, -0.0075)
+        trim.sample(960, 0, 72 * 1024L)
+        trim.rateDue(0)
+        // Catch-up output plus remaining compressed packets is a transient recovery peak.
+        trim.sample(19_200, 1_000_000_000L, 14_336)
+        trim.rateDue(1_000_000_000L)
+        assertEquals(47_640, trim.rate)
+        assertEquals(-0.0075, trim.snapshot(1_000_000_000L).integral, 0.0)
+    }
+
+    @Test fun compressedDecoderBacklogDoesNotApplyTheObservedOnePointFivePercentOverspeed() {
+        val trim = MediaClockTrim(48_000, 14_400)
+        // Code102: source near 48,068 frames/s, but the track ran near 48,720
+        // while compressed packets accumulated. This is decoder congestion, not 1.5% clock drift.
+        for (step in 0..600) {
+            val now = step * 100_000_000L
+            trim.sample(960, now, compressedFrames = 72 * 1024L)
+            trim.rateDue(now)
+            assertEquals("backlog at $step", 48_000, trim.rate)
+        }
+        assertEquals(0.0, MediaClockTrim.learnedTrim, 0.0)
+        // A decoder recovery must not retain the large filtered congestion error.
+        trim.sample(14_400, 60_100_000_000L)
+        trim.rateDue(61_000_000_000L)
+        assertEquals(48_000, trim.rate)
+    }
+
+    @Test fun decoderCongestionPreservesLearnedHardwareCorrectionAcrossRebuffer() {
+        val trim = MediaClockTrim(48_000, 14_400, -0.0075)
+        trim.sample(14_400, 0)
+        trim.rateDue(0)
+        for (second in 1..12) {
+            trim.sample(960, second * 1_000_000_000L, compressedFrames = 96 * 1024L)
+            trim.rateDue(second * 1_000_000_000L)
+            assertEquals(47_640, trim.rate)
+        }
+        trim.restartSampling()
+        trim.sample(14_400, 13_000_000_000L)
+        trim.rateDue(13_000_000_000L)
+        assertEquals(47_640, trim.rate)
+        assertEquals(-0.0075, trim.snapshot(13_000_000_000L).integral, 0.0)
+    }
+
     @Test fun aLargeCompressedQueueMustNotTrickClockControlIntoSlowingDownFurther() {
         val trim = MediaClockTrim(48_000, 14_400)
         // The #806 recording had 150-192 pending AAC packets while Android's track writes

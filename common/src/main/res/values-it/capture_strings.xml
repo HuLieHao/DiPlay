@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_capture_stop">Interrompi raccolta</string>
+    <string name="settings_capture_stop_first">Interrompi la raccolta prima di salvare o scaricare il rapporto.</string>
+    <string name="settings_capture_status">Raccolta dettagliata · %1$d secondi</string>
+    <string name="settings_capture_hint">La raccolta inizia all’apertura. Riproduci il problema, interrompi la raccolta e scarica il rapporto.</string>
+    <string name="settings_capture_heavy_audio">Istantanee audio e analisi dei thread</string>
+    <string name="settings_capture_heavy_audio_description">Si applica durante la raccolta. Se attivo, raccoglie dump dei servizi audio e dettagli dei thread. Se disattivo, li salta e conserva eventi audio, PCAP e statistiche leggere. La verifica in corso viene annullata; non serve riconnettersi.</string>
+</resources>

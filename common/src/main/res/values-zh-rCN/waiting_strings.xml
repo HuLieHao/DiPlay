@@ -28,8 +28,6 @@
     <string name="waiting_phase_picture">显示画面</string>
     <string name="waiting_steps_title">连接步骤</string>
     <string name="waiting_network_title">网络状态</string>
-    <string name="waiting_details_show">连接详情</string>
-    <string name="waiting_details_hide">收起详情</string>
     <string name="waiting_current_time">当前阶段：%1$d 秒</string>
     <string name="waiting_total_attempt">总耗时：%1$d 秒 · 第 %2$d 次尝试</string>
     <string name="waiting_duration">%1$.1f 秒</string>

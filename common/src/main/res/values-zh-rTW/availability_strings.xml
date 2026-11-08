@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="waiting_availability_timeout">認證已通過，但 iPhone 在 30 秒內未啟動 CarPlay</string>
+    <string name="connection_help_availability">請解鎖 iPhone，檢查是否有 CarPlay 確認提示；仍無法連線時請重試。</string>
+</resources>

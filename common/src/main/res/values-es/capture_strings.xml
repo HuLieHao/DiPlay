@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_capture_stop">Detener captura</string>
+    <string name="settings_capture_stop_first">Detén la captura antes de guardar o descargar el informe.</string>
+    <string name="settings_capture_status">Captura detallada · %1$d segundos</string>
+    <string name="settings_capture_hint">La captura comienza al abrir la aplicación. Detén la captura tras reproducir el problema y descarga el informe.</string>
+    <string name="settings_capture_heavy_audio">Capturas de audio y análisis de hilos</string>
+    <string name="settings_capture_heavy_audio_description">Se aplica durante la recopilación. Activado recoge volcados del servicio de audio y detalles de hilos. Desactivado los omite y conserva eventos de audio, PCAP y estadísticas ligeras. Se cancela la prueba en curso; no requiere reconectar.</string>
+</resources>

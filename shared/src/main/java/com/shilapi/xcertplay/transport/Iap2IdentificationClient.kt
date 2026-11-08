@@ -435,6 +435,7 @@ class Iap2IdentificationClient(private val session: Iap2Session) {
             0x4158, // CommunicationsUpdate
             0x4155, // CallStateUpdate
             0x4300, // CarPlayAvailability
+            0x4e0b, // DeviceTimeUpdate: authenticated iPhone calendar time
         )
         private val MESSAGE_LIST_PARAMETERS = setOf(6, 7)
         private val AUTHENTICATION_MESSAGES = setOf(0xaa00, 0xaa01, 0xaa02, 0xaa03, 0xaa04, 0xaa05)

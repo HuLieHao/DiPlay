@@ -21,9 +21,11 @@ class Iap2LinkChannel private constructor(
     private val linkConfig: Iap2LinkConfig,
     private val initiateNegotiation: Boolean,
     private val onArtwork: (Iap2ArtworkTransfer) -> Unit,
+    private val onDiagnostic: (String) -> Unit,
 ) : AutoCloseable {
-    private data class Command(val sessionId: Int, val payload: ByteArray)
+    private data class Command(val sessionId: Int, val payload: ByteArray, val diagnosticContext: String)
 
+    private val diagnosticLinkId = nextDiagnosticLinkId.incrementAndGet()
     private val lock = Object()
     private val commands = ArrayDeque<Command>()
     private var commandBytes = 0
@@ -78,7 +80,7 @@ class Iap2LinkChannel private constructor(
      * Like [sendControl], but waits for command-queue capacity.  CSM uses this to queue every
      * fragment of one frame without converting link backpressure into a partial CSM write.
      */
-    internal fun sendControlAwaitCapacity(bytes: ByteArray, timeoutMillis: Long): Boolean {
+    internal fun sendControlAwaitCapacity(bytes: ByteArray, timeoutMillis: Long, diagnosticContext: String = ""): Boolean {
         require(bytes.size <= Iap2LinkEngine.MAX_PAYLOAD_BYTES) {
             "iAP2 control payload exceeds ${Iap2LinkEngine.MAX_PAYLOAD_BYTES} bytes"
         }
@@ -90,7 +92,7 @@ class Iap2LinkChannel private constructor(
             }
             throwTerminalFailureLocked()
             if (terminated || closing) return false
-            return enqueueCommandLocked(Iap2LinkEngine.CONTROL_SESSION_ID, copy)
+            return enqueueCommandLocked(Iap2LinkEngine.CONTROL_SESSION_ID, copy, diagnosticContext)
         }
     }
 
@@ -143,7 +145,7 @@ class Iap2LinkChannel private constructor(
     }
 
     private fun runPump() {
-        val engine = Iap2LinkEngine(linkConfig)
+        val engine = Iap2LinkEngine(linkConfig, ::diagnostic)
         try {
             engine.start(wiredInitiator = initiateNegotiation, nowMillis = nowMillis())
             while (!isClosing()) {
@@ -188,14 +190,13 @@ class Iap2LinkChannel private constructor(
                     }
                 }
             } ?: return
-            engine.sendSession(command.sessionId, command.payload, nowMillis())
+            engine.sendSession(command.sessionId, command.payload, nowMillis(), command.diagnosticContext)
             if (isClosing()) return
         }
     }
 
     private fun flush(engine: Iap2LinkEngine) {
-        val bytes = engine.takeOutput()
-        if (bytes.isNotEmpty()) underlying.send(bytes)
+        engine.flushOutput(underlying::send)
     }
 
     /** Returns false when a link terminal event has been observed. */
@@ -309,12 +310,19 @@ class Iap2LinkChannel private constructor(
         commands.size < MAX_PENDING_COMMANDS && bytes <= MAX_PENDING_COMMAND_BYTES - commandBytes
 
     /** lock must already be held. */
-    private fun enqueueCommandLocked(sessionId: Int, bytes: ByteArray): Boolean {
+    private fun enqueueCommandLocked(sessionId: Int, bytes: ByteArray, diagnosticContext: String = ""): Boolean {
         if (!hasCommandCapacityLocked(bytes.size)) return false
-        commands += Command(sessionId, bytes)
+        commands += Command(sessionId, bytes, diagnosticContext)
+        diagnostic("IAP2 LINK event=command_queued session=$sessionId bytes=${bytes.size} $diagnosticContext")
         commandBytes += bytes.size
         lock.notifyAll()
         return true
+    }
+
+    private fun diagnostic(message: String) {
+        try { onDiagnostic("$message link_id=$diagnosticLinkId") } catch (_: Throwable) {
+            // Even a broken observer cannot turn an accepted command into a send failure.
+        }
     }
 
     /** lock must already be held. */
@@ -347,6 +355,7 @@ class Iap2LinkChannel private constructor(
     }
 
     companion object {
+        private val nextDiagnosticLinkId = java.util.concurrent.atomic.AtomicLong()
         private const val RECEIVE_CHUNK_BYTES = 8_192
         private const val RECEIVE_POLL_MILLIS = 100L
         private const val MINIMUM_RECEIVE_POLL_MILLIS = 1L
@@ -372,8 +381,9 @@ class Iap2LinkChannel private constructor(
         fun open(
             underlying: BlockingDuplexByteStream,
             onArtwork: (Iap2ArtworkTransfer) -> Unit = {},
+            onDiagnostic: (String) -> Unit = {},
         ): Iap2LinkChannel =
-            Iap2LinkChannel(underlying, WIRED_LINK_CONFIG, initiateNegotiation = true, onArtwork)
+            Iap2LinkChannel(underlying, WIRED_LINK_CONFIG, initiateNegotiation = true, onArtwork, onDiagnostic)
                 .also { it.worker.start() }
 
         /**
@@ -383,8 +393,9 @@ class Iap2LinkChannel private constructor(
         fun openWireless(
             underlying: BlockingDuplexByteStream,
             onArtwork: (Iap2ArtworkTransfer) -> Unit = {},
+            onDiagnostic: (String) -> Unit = {},
         ): Iap2LinkChannel =
-            Iap2LinkChannel(underlying, WIRELESS_LINK_CONFIG, initiateNegotiation = false, onArtwork)
+            Iap2LinkChannel(underlying, WIRELESS_LINK_CONFIG, initiateNegotiation = false, onArtwork, onDiagnostic)
                 .also { it.worker.start() }
 
         /**
@@ -394,8 +405,9 @@ class Iap2LinkChannel private constructor(
         fun openTunnel(
             underlying: BlockingDuplexByteStream,
             onArtwork: (Iap2ArtworkTransfer) -> Unit = {},
+            onDiagnostic: (String) -> Unit = {},
         ): Iap2LinkChannel =
-            Iap2LinkChannel(underlying, WIRED_LINK_CONFIG, initiateNegotiation = true, onArtwork)
+            Iap2LinkChannel(underlying, WIRED_LINK_CONFIG, initiateNegotiation = true, onArtwork, onDiagnostic)
                 .also { it.worker.start() }
 
         private fun nowMillis(): Long = System.nanoTime() / NANOS_PER_MILLISECOND

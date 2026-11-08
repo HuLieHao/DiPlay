@@ -80,15 +80,23 @@ internal class DiagnosticArchive(
                 activeRun.updateAndGet { if (it.session == session) it.copy(attempt = attempt) else it }
             }
             val now = wall(); val mono = monotonic()
-            val delta = now - lastWall - (mono - lastMono)
-            if (!validWall(now) || kotlin.math.abs(delta) > 300_000 || now < lastWall) {
+            val wallDelta = now - lastWall
+            val monoDelta = mono - lastMono
+            val delta = wallDelta - monoDelta
+            val jumped = kotlin.math.abs(delta) > 300_000 || now < lastWall
+            if (!validWall(now) || jumped) {
                 clockValid = false
                 if (invalidClockRecorded.add(session)) {
                     val meta = File(directory, "$session.meta")
                     if (meta.length() < MAX_METADATA_BYTES)
                         writeAdmitted(meta, "clockValid=false clock_jump=true\n".toByteArray(), append = true)
-                    summary(session, "clock_jump wallMs=$now previousWallMs=$lastWall monotonicMs=$mono dateSelectionUnreliable=true")
                 }
+                // Metadata is marked once; retain subsequent jumps (including recovery) separately.
+                // A steadily ticking invalid date must not produce an event for every log line.
+                if (jumped) summary(session, "clock_jump process=$processId session=$session " +
+                    "wallMs=$now previousWallMs=$lastWall monotonicMs=$mono previousMonotonicMs=$lastMono " +
+                    "wallDeltaMs=$wallDelta monotonicDeltaMs=$monoDelta driftMs=$delta " +
+                    "wallPlausible=${validWall(now)} dateSelectionUnreliable=true timeSource=unknown")
             }
             lastWall = now; lastMono = mono
             val text = original.take(MAX_LINE_CHARS) + if (original.length > MAX_LINE_CHARS) " [truncated oversized line]\n" else "\n"
@@ -165,6 +173,21 @@ internal class DiagnosticArchive(
 
     /** Pins a fixed byte prefix of each selected file; cleanup cannot unlink it until ZIP completion. */
     fun export(destination: File, selection: String = "all", metadata: String): File {
+        try {
+            destination.parentFile?.mkdirs()
+            destination.outputStream().use { output ->
+                exportTo(output, selection, metadata) { required ->
+                    if ((destination.parentFile?.usableSpace ?: root.usableSpace) - required < reserve)
+                        throw IOException("Insufficient space for local export; use streaming phone download")
+                }
+            }
+            return destination
+        } catch (failure: Exception) { destination.delete(); throw failure }
+    }
+
+    /** Writes directly to the caller; no staged ZIP or disk-space reservation for network export. */
+    fun exportTo(output: java.io.OutputStream, selection: String = "all", metadata: String,
+        checkSpace: ((Long) -> Unit)? = null) {
         val selected: List<Pair<File, Long>>
         val cutoff: Long
         val valid: Boolean
@@ -191,16 +214,23 @@ internal class DiagnosticArchive(
             parts.keys.toList().forEach { id -> parts[id] = (parts[id] ?: 0) + 1 }
         }
         try {
-            destination.parentFile?.mkdirs()
-            val required = selected.sumOf { it.second } + metadata.length.toLong() * 3 + 128 * 1024
-            if ((destination.parentFile?.usableSpace ?: root.usableSpace) - required < reserve)
-                throw IOException("Insufficient space for export while preserving the diagnostic reserve")
-            ZipOutputStream(destination.outputStream().buffered(32 * 1024)).use { zip ->
+            val captures = StartupCaptureFiles.snapshot(File(root.parentFile, "startup-captures"))
+            val required = (selected + captures).sumOf { it.second } + metadata.length.toLong() * 3 + 128 * 1024
+            checkSpace?.invoke(required)
+            // ZIP owns its framing, but the caller owns the socket / destination stream.
+            val nonClosing = object : java.io.FilterOutputStream(output) {
+                override fun write(bytes: ByteArray, offset: Int, length: Int) = out.write(bytes, offset, length)
+                override fun close() = flush()
+            }
+            ZipOutputStream(nonClosing.buffered(32 * 1024)).use { zip ->
                 val manifest = StringBuilder("format=1 selection=$selection cutoffWallMs=$cutoff clockValid=$valid clockValidity=local_plausibility_only_no_external_time_validation process=$processId timezone=${TimeZone.getDefault().id}\n" +
                     "detailBudgetBytes=$detailBudget detailDays=7 summaryBudgetBytes=4194304 summaryDays=14 exceptionCount=8 networkCount=3 networkMaxChars=655360 reserveBytes=$reserve\n" +
+                    "ordering=zip_filename_order_not_chronology; within_session_use_numeric_part_then_line; compare_monotonicMs_only_with_same_process; cross_process_order_unknown_when_wall_unreliable; file_mtime_is_not_event_time\n" +
                     "sessionUnit=controller_connection_run_or_host_setup; controller retries retain protocol attempt IDs; not an ACC/trip detector. Original recording build/startup identity is in session metadata.\nrangeBasis=session_start_wall_time; for sessions spanning midnight choose all/session.\nConsistency: fixed byte prefixes; partial writes are preserved; queued tail may be missing. Unknown-date sessions are excluded from date ranges; use all/session selection.\n")
-                for ((file, length) in selected) {
-                    zip.putNextEntry(ZipEntry("logs/${file.name}"))
+                manifest.append("captureScope=all_retained_processes captureSizeRotation=false pcapPrefix=published_complete_records captureTail=may_be_unpublished\n")
+                for ((file, length) in selected + captures) {
+                    val entryName = if ((file to length) in captures) "startup-captures/${file.parentFile!!.name}/${file.name}" else "logs/${file.name}"
+                    zip.putNextEntry(ZipEntry(entryName))
                     val digest = MessageDigest.getInstance("SHA-256")
                     var remaining = length; var copied = 0L; var error: String? = null
                     try {
@@ -215,21 +245,30 @@ internal class DiagnosticArchive(
                         }
                     } catch (failure: IOException) { error = failure.javaClass.simpleName }
                     zip.closeEntry()
-                    manifest.append("file=logs/${file.name} selectedBytes=$length bytes=$copied sha256=${digest.digest().joinToString("") { "%02x".format(it) }} status=${error ?: "complete"}\n")
+                    manifest.append("file=$entryName selectedBytes=$length bytes=$copied sha256=${digest.digest().joinToString("") { "%02x".format(it) }} status=${error ?: "complete"}\n")
+                    if (file.extension == "pcap" && error == null) {
+                        val boundary = "$copied\n".toByteArray()
+                        zip.putNextEntry(ZipEntry("$entryName.complete")); zip.write(boundary); zip.closeEntry()
+                        manifest.append("file=$entryName.complete bytes=${boundary.size} source=exported_pcap_prefix\n")
+                    }
                 }
                 val diagnosticBytes = metadata.toByteArray(Charsets.UTF_8)
                 zip.putNextEntry(ZipEntry("diagnostics.txt")); zip.write(diagnosticBytes); zip.closeEntry()
                 manifest.append("file=diagnostics.txt bytes=${diagnosticBytes.size} sha256=${MessageDigest.getInstance("SHA-256").digest(diagnosticBytes).joinToString("") { "%02x".format(it) }} status=complete\n")
                 zip.putNextEntry(ZipEntry("manifest.txt")); zip.write(manifest.toString().toByteArray(Charsets.UTF_8)); zip.closeEntry()
             }
-            return destination
-        } catch (failure: Exception) { destination.delete(); throw failure }
-        finally { synchronized(lock) { selected.forEach { (file, _) -> val count = (pins[file.absolutePath] ?: 1) - 1; if (count == 0) pins.remove(file.absolutePath) else pins[file.absolutePath] = count }; cleanup() } }
+        } finally { synchronized(lock) { selected.forEach { (file, _) -> val count = (pins[file.absolutePath] ?: 1) - 1; if (count == 0) pins.remove(file.absolutePath) else pins[file.absolutePath] = count }; cleanup() } }
     }
 
     fun sessions(): List<Pair<String, String>> = synchronized(lock) {
         directory.listFiles().orEmpty().filter { it.extension == "meta" }.sortedByDescending { it.lastModified() }
-            .map { it.nameWithoutExtension to readMetadata(it).lineSequence().first().take(512) }
+            .map {
+                val metadata = readMetadata(it)
+                val header = metadata.lineSequence().first().take(512)
+                // Later markers invalidate the original header too; don't advertise a known-bad date.
+                it.nameWithoutExtension to if (metadata.contains("clockValid=false"))
+                    header.replace("clockValid=true", "clockValid=false") else header
+            }
     }
 
     private fun migrateLegacy() {
@@ -331,16 +370,25 @@ internal class DiagnosticArchive(
     }.getOrDefault(false)
     private fun cleanup(detailLimit: Long = detailBudget, summaryLimit: Long = 4L * 1024 * 1024, spaceNeeded: Long = 0) {
         val all = directory.listFiles().orEmpty().filter { it.isFile }.sortedBy { it.lastModified() }
+        // One directory snapshot for the entire pass. Listing it once per metadata file
+        // makes overnight retry archives quadratic and stalls the bounded log writer.
+        val evidenceCounts = all.filter { it.extension != "meta" }
+            .groupingBy { it.name.take(36) }.eachCount().toMutableMap()
+        val metadataBySession = mutableMapOf<String, String>()
         fun prune(extension: String, budget: Long, days: Int, count: Int = Int.MAX_VALUE) {
             val files = all.filter { it.extension == extension }; var bytes = files.sumOf { it.length() }; var size = files.size
             for (file in files) {
                 val meta = File(directory, file.name.take(36) + ".meta")
-                val metadata = if (meta.isFile) readMetadata(meta) else ""
+                val metadata = metadataBySession.getOrPut(meta.nameWithoutExtension) {
+                    if (meta.isFile) readMetadata(meta) else ""
+                }
                 val created = Regex("wallMs=(\\d+)").find(metadata)?.groupValues?.get(1)?.toLongOrNull()
                 val expired = clockValid && !metadata.contains("clockValid=false") && validWall(wall()) && created != null && wall() >= created && wall() - created > days * DAY
                 if ((expired || bytes > budget || size > count || extension == "log" && spaceNeeded > 0 && !hasSpace(spaceNeeded)) && file.absolutePath !in pins) {
                     val length = file.length()
                     if (file.delete()) {
+                        val evidenceId = file.name.take(36)
+                        evidenceCounts[evidenceId] = (evidenceCounts[evidenceId] ?: 1) - 1
                         if (extension == "log") {
                             val id = file.name.take(36)
                             if (parts.containsKey(id) && detail(id) == file) parts[id] = (parts[id] ?: 0) + 1
@@ -358,7 +406,7 @@ internal class DiagnosticArchive(
         prune("network", 3L * 3 * 640 * 1024, 7, 3)
         // Metadata lives exactly as long as its evidence; interrupted starts do not accumulate forever.
         all.filter { it.extension == "meta" && it.nameWithoutExtension != current && it.nameWithoutExtension !in pendingStarts && it.nameWithoutExtension !in writesInProgress }.forEach { meta ->
-            if (directory.listFiles().orEmpty().none { it != meta && it.name.startsWith(meta.nameWithoutExtension) }) meta.delete()
+            if ((evidenceCounts[meta.nameWithoutExtension] ?: 0) == 0) meta.delete()
         }
         parts.keys.removeAll { it != current && it !in pendingStarts && !File(directory, "$it.meta").isFile }
         invalidClockRecorded.removeAll { it != current && !File(directory, "$it.meta").isFile }

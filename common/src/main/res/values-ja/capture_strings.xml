@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_capture_stop">収集を停止</string>
+    <string name="settings_capture_stop_first">レポートを保存またはダウンロードする前に収集を停止してください。</string>
+    <string name="settings_capture_status">詳細収集 · %1$d 秒</string>
+    <string name="settings_capture_hint">アプリ起動時に収集します。問題を再現し、収集を停止してからレポートをダウンロードしてください。</string>
+    <string name="settings_capture_heavy_audio">音声サービスの詳細取得とスレッド走査</string>
+    <string name="settings_capture_heavy_audio_description">収集中に適用されます。オンでは音声サービスのダンプとスレッド詳細を取得します。オフではこれらを省略し、音声イベント、PCAP、軽量な統計を保持します。実行中の調査は取り消され、再接続は不要です。</string>
+</resources>

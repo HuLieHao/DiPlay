@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="waiting_availability_timeout">Authentication passed, but iPhone did not start CarPlay within 30 seconds</string>
+    <string name="connection_help_availability">Unlock your iPhone and check for a CarPlay prompt. Retry if it still does not connect.</string>
+</resources>

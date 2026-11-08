@@ -1763,7 +1763,40 @@ private class AudioRenderer(
     private val echoReference: EchoReference? = null,
     voiceFilter: Boolean = false,
 ) : Closeable {
-    private data class AudioPacket(val rtp: ByteArray, val sample: Int)
+    private data class AudioPacket(val rtp: ByteArray, val sample: Int, val evidence: AudioEvidence.Packet)
+    private val evidence = AudioEvidence()
+    private var handlingEvidence: AudioEvidence.Packet? = null
+    private var writingEvidence: AudioEvidence.Packet? = null
+    private var lastTimestampNs = 0L
+    private var lastUnderrunObservedNs = 0L
+    private var observedUnderruns = 0
+
+    private fun anomaly(kind: String, detail: String, packet: AudioEvidence.Packet? = null) {
+        runCatching {
+            val now = System.nanoTime()
+            val wall = System.currentTimeMillis()
+            val context = "audioType=${format.audioType} codec=${format.codec} queue=${queue.size} writtenFramesApprox=$totalWrittenFrames playing=$playbackStarted ${evidence.context(packet)} $detail"
+            com.shilapi.xcertplay.diagnostics.AudioCaptureEvents.emit("$kind\t${evidence.id}\t$wall\t$now\t$context")
+        }
+    }
+
+    private fun sampleTrackEvidence() {
+        runCatching {
+            val track = track ?: return
+            val now = System.nanoTime()
+            val count = track.underrunCount
+            if (count > observedUnderruns) anomaly("UNDERRUN", "delta=${count-observedUnderruns} observedNs=$now observationStartNs=$lastUnderrunObservedNs occurrenceNs=unknown playbackHead=${track.playbackHeadPosition}")
+            observedUnderruns = count
+            lastUnderrunObservedNs = now
+            if (now - lastTimestampNs >= 10_000_000_000L) {
+                lastTimestampNs = now
+                val timestamp = android.media.AudioTimestamp()
+                val available = runCatching { track.getTimestamp(timestamp) }.getOrDefault(false)
+                report("Audio: timestamp renderer=${evidence.id} wallMs=${System.currentTimeMillis()} observedNs=$now " + AudioEvidence.timestamp(available, timestamp.framePosition, timestamp.nanoTime, track.playState))
+                report("Audio: timing renderer=${evidence.id} ${evidence.summary()}")
+            }
+        }
+    }
 
     private val pcmChannels = if (format.channels >= 2) 2 else 1
     private val voiceFilter = if (voiceFilter && format.sampleRate > 0) VoiceFilter(format.sampleRate, pcmChannels) else null
@@ -1846,6 +1879,7 @@ private class AudioRenderer(
     }
 
     fun submit(rtp: ByteArray, sample: Int) {
+        val submitted = evidence.packet(if (rtp.size >= 4) ((rtp[2].toInt() and 255) shl 8) or (rtp[3].toInt() and 255) else -1, sample, System.nanoTime())
         if (started) {
             packetsReceived.incrementAndGet()
             val now = System.nanoTime()
@@ -1857,6 +1891,7 @@ private class AudioRenderer(
             val removed = mediaLagGuard?.recover(queue, sample, AudioPacket::sample, now) ?: 0
             if (removed > 0) {
                 packetsDropped.addAndGet(removed)
+                anomaly("QUEUE_DROP", "reason=lag_guard count=$removed droppedPacketIdentity=unknown incomingContext=true", submitted)
                 if (lagRecoveryReports < MAX_REBUFFER_REPORTS) {
                     lagRecoveryReports++
                     report("Audio: stale media packet backlog recovered audioType=${format.audioType} " +
@@ -1864,8 +1899,8 @@ private class AudioRenderer(
                 }
             }
         }
-        if (!started || !queue.offer(AudioPacket(rtp, sample))) {
-            if (started) packetsDropped.incrementAndGet()
+        if (!started || !queue.offer(AudioPacket(rtp, sample, submitted))) {
+            if (started) { packetsDropped.incrementAndGet(); anomaly("QUEUE_DROP", "reason=full", submitted) }
             if (started && !droppedPacketsLogged) {
                 droppedPacketsLogged = true
                 Log.w(TAG, "audio queue full; dropping newest packets to bound latency")
@@ -1886,8 +1921,10 @@ private class AudioRenderer(
 
     private fun run() {
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO) }
+        // Peaks are recorded while handling the first packet, before the first periodic report.
+        statsWindowStartNs = System.nanoTime()
         try {
-            runCatching { report("Audio: starting api=${Build.VERSION.SDK_INT} " +
+            runCatching { report("Audio: starting renderer=${evidence.id} api=${Build.VERSION.SDK_INT} " +
                 "audioType=${format.audioType} codec=${format.codec} rate=${format.sampleRate} channels=${format.channels} " +
                 "mapping=${if (advancedAudioChannelMapping) "automotive" else "mobile"} " +
                 "mediaChannel=$mediaChannel navigationChannel=$navigationChannel focus=$audioFocusEnabled") }
@@ -1912,6 +1949,7 @@ private class AudioRenderer(
                 maintainPlaybackBuffer()
                 diagnosticStage = "stats"
                 logStatsIfDue()
+                sampleTrackEvidence()
             }
         } catch (_: InterruptedException) {
             // Worker shut down.
@@ -1989,8 +2027,13 @@ private class AudioRenderer(
         }
         val selection = mappedSelection()
         mappedChannel = selection.channel
+        val configuredLegacy = when (selection.channel) {
+            AudioChannel.MEDIA -> mediaChannel
+            AudioChannel.NAVIGATION -> navigationChannel
+            else -> 0
+        }
         val streamOverride = channelOverride(selection.channel)
-        actualLegacyStreamType = streamOverride.takeIf { it != 0 }
+        actualLegacyStreamType = null
         var attributes = audioAttributesFor(selection, streamOverride)
         trackAttributes = attributes
         val plan = MediaAudioBuffer.plan(selection.channel == AudioChannel.MEDIA,
@@ -1998,6 +2041,7 @@ private class AudioRenderer(
         bytesPerSecond = format.sampleRate * frameBytes
         val built: AudioTrack
         var routeLabel: String
+        var legacyAccepted = false
         diagnosticStage = "track-build"
         if (streamOverride == 0) {
             attributes = audioAttributesFor(selection)
@@ -2016,7 +2060,7 @@ private class AudioRenderer(
                     AudioTrack(streamType, format.sampleRate, channelMask, encoding,
                         plan.trackBufferBytes, AudioTrack.MODE_STREAM)
                 },
-                isInitialized = { it.state == AudioTrack.STATE_INITIALIZED },
+                isInitialized = { (it.state == AudioTrack.STATE_INITIALIZED).also { initialized -> legacyAccepted = initialized } },
                 release = { it.release() },
                 createFallback = {
                     diagnosticStage = "track-fallback-build"
@@ -2033,6 +2077,7 @@ private class AudioRenderer(
                 },
             )
         }
+        actualLegacyStreamType = streamOverride.takeIf { legacyAccepted }
         track = built
         if (mappedChannel == AudioChannel.PHONE) {
             val listener = AudioRouting.OnRoutingChangedListener { routing -> checkCallRoute(routing.routedDevice) }
@@ -2054,13 +2099,14 @@ private class AudioRenderer(
         // Only music plays long enough for the clocks to drift apart; calls keep their echo reference exact.
         clockTrim = if (mappedChannel == AudioChannel.MEDIA) MediaClockTrim(format.sampleRate, (startThresholdBytes / frameBytes).toLong()) else null
         val trackMetadata = runCatching {
-            "api=${Build.VERSION.SDK_INT} trackState=${built.state} trackRate=${built.sampleRate} " +
+            "api=${Build.VERSION.SDK_INT} sessionId=${built.audioSessionId} trackState=${built.state} trackRate=${built.sampleRate} " +
                 "usage=${trackAttributes?.usage} contentType=${trackAttributes?.contentType} " +
                 "attributesSource=${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "track" else "configured"}"
         }.getOrDefault("api=${Build.VERSION.SDK_INT} trackMetadata=unavailable")
-        report("Audio: ready audioType=${format.audioType} codec=${format.codec} " +
+        report("Audio: ready renderer=${evidence.id} audioType=${format.audioType} codec=${format.codec} " +
             "rate=${format.sampleRate} channels=${format.channels} " +
-            "route=$routeLabel " +
+            "route=$routeLabel configuredLegacy=$configuredLegacy requestedLegacy=$streamOverride actualLegacy=${actualLegacyStreamType ?: "unknown"} " +
+            "channel=${selection.channel} profile=${Ff5000AudioProfile.supported()} " +
             "bufferMs=${capacityBytes * 1000L / bytesPerSecond} startMs=${startThresholdBytes * 1000L / bytesPerSecond} " +
             trackMetadata)
         Log.i(
@@ -2084,8 +2130,8 @@ private class AudioRenderer(
 
     /** 0 uses usage-based routing; 1–20 attempt legacy stream types supported by the head unit. */
     private fun channelOverride(channel: AudioChannel): Int = when (channel) {
-        AudioChannel.MEDIA -> mediaChannel
-        AudioChannel.NAVIGATION -> navigationChannel
+        AudioChannel.MEDIA -> mediaChannel.takeIf { it != 0 } ?: if (Ff5000AudioProfile.supported() && !speakerphoneCall) 3 else 0
+        AudioChannel.NAVIGATION -> navigationChannel.takeIf { it != 0 } ?: if (Ff5000AudioProfile.supported() && !format.audioType.equals("alert", true)) 11 else 0
         else -> 0
     }
 
@@ -2250,10 +2296,12 @@ private class AudioRenderer(
         if (queue.isEmpty()) {
             droppedPacketsLogged = false
         }
+        handlingEvidence = packet.evidence
+        runCatching { evidence.dequeued(packet.evidence, System.nanoTime()) }
         val rtp = packet.rtp
         val timestampUs = sampleTimestampUs(packet.sample)
         when (format.codec) {
-            AudioCodecKind.LPCM -> writePcm(byteSwapS16(rtp.copyOfRange(12, rtp.size)))
+            AudioCodecKind.LPCM -> { writingEvidence = packet.evidence; writePcm(byteSwapS16(rtp.copyOfRange(12, rtp.size))) }
             AudioCodecKind.AAC_LC -> {
                 val accessUnit = rtp.copyOfRange(12, rtp.size)
                 if (accessUnit.isNotEmpty()) {
@@ -2274,6 +2322,7 @@ private class AudioRenderer(
                 val accessUnit = rtp.copyOfRange(12, rtp.size)
                 if (accessUnit.size < MIN_OPUS_PACKET_BYTES) {
                     shortOpusPackets++
+                    anomaly("DECODER_DROP", "reason=short_opus", packet.evidence)
                     if (!firstOpusShortPacketLogged) {
                         firstOpusShortPacketLogged = true
                         Log.i(
@@ -2289,10 +2338,10 @@ private class AudioRenderer(
     }
 
     private fun sampleTimestampUs(sample: Int): Long =
-        (sample.toLong() and 0xffff_ffffL) * 1_000_000L / format.sampleRate
+        audioRtpTimestampUs(sample, format)
 
     private fun feedCodec(payload: ByteArray, presentationTimeUs: Long) {
-        val codec = codec ?: run { decoderUnavailablePackets++; return }
+        val codec = codec ?: run { decoderUnavailablePackets++; anomaly("DECODER_DROP", "reason=unavailable", handlingEvidence); return }
         diagnosticStage = "decoder-input"
         // While a blocking track write holds this thread, decoded output fills up and the decoder
         // stops taking input. Dropping the packet after one 10 ms wait cut ~21 ms of music every
@@ -2308,6 +2357,7 @@ private class AudioRenderer(
         )
         if (index < 0) {
             inputDropped++
+            anomaly("DECODER_DROP", "reason=input_unavailable_or_oversize", handlingEvidence)
             if (inputDropped == 1) {
                 Log.w(
                     TAG,
@@ -2317,12 +2367,13 @@ private class AudioRenderer(
             }
             return
         }
-        val input = codec.getInputBuffer(index) ?: return
+        val input = codec.getInputBuffer(index) ?: run { anomaly("DECODER_DROP", "reason=null_input_buffer", handlingEvidence); return }
         input.clear()
         if (payload.size <= input.remaining()) {
             input.put(payload)
             codec.queueInputBuffer(index, 0, payload.size, presentationTimeUs, 0)
             inputQueued++
+            runCatching { handlingEvidence?.let { evidence.input(presentationTimeUs, it, System.nanoTime()) } }
             if (!firstInputQueuedLogged) {
                 firstInputQueuedLogged = true
                 Log.i(
@@ -2333,6 +2384,7 @@ private class AudioRenderer(
         } else {
             codec.queueInputBuffer(index, 0, 0, 0, 0)
             inputDropped++
+            anomaly("DECODER_DROP", "reason=input_unavailable_or_oversize", handlingEvidence)
         }
         drainCodec(codec)
     }
@@ -2387,7 +2439,11 @@ private class AudioRenderer(
                     } finally {
                         codec.releaseOutputBuffer(index, false)
                     }
-                    if (copied) writePcm(pcm, 0, size)
+                    if (copied) {
+                        writingEvidence = runCatching { evidence.output(info.presentationTimeUs, System.nanoTime()) }.getOrNull()
+                        runCatching { evidence.decoded(writingEvidence, System.nanoTime()) }
+                        writePcm(pcm, 0, size)
+                    }
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
                 }
                 else -> return
@@ -2422,7 +2478,10 @@ private class AudioRenderer(
             val writeStarted = System.nanoTime()
             diagnosticStage = "track-write"
             val count = track.write(data, offset + written, writeLength, AudioTrack.WRITE_BLOCKING)
-            maxWriteMs = maxOf(maxWriteMs, (System.nanoTime() - writeStarted) / 1_000_000L)
+            val writeEnded = System.nanoTime()
+            runCatching { evidence.wrote(writeEnded - writeStarted, writingEvidence, writeStarted, writeEnded, count) }
+            if (count <= 0 || writeEnded - writeStarted >= 100_000_000L) anomaly(if (count < 0) "WRITE_ERROR" else "WRITE_ANOMALY", "triggerBasis=${if (count <= 0) "nonpositive_write_result" else "slow_write_heuristic"} slowThresholdNs=100000000 faultDiagnosis=unknown writeStartNs=$writeStarted writeEndNs=$writeEnded bytes=$count requested=$writeLength", writingEvidence)
+            maxWriteMs = maxOf(maxWriteMs, (writeEnded - writeStarted) / 1_000_000L)
             if (count < 0) {
                 writeErrorsThisWindow++
                 lastWriteErrorCode = count
@@ -2470,12 +2529,16 @@ private class AudioRenderer(
         underrunsAtPlaybackStart = track.underrunCount
         track.play()
         playbackStarted = true
+        if (rebufferCount > 0) anomaly("REBUFFER_RECOVERY", "pausedNs=$rebufferPausedNs count=$rebufferCount")
         reportNavigationPlayback(track)
         if (rebufferCount > 0 && rebufferRecoverReportCount < MAX_REBUFFER_REPORTS) {
             rebufferRecoverReportCount++
             reportClockState("after-recovery", System.nanoTime(), prebufferBytes.toLong() / frameBytes)
             report("Audio: rebuffer recovered audioType=${format.audioType} rebufferCount=$rebufferCount")
         }
+        // Even short pauses invalidate the continuous-drain model; keep the learned trim,
+        // but never integrate paused time. This also applies after diagnostics reach their cap.
+        if (rebufferCount > 0) clockTrim?.restartSampling()
     }
 
     private fun reportNavigationPlayback(track: AudioTrack) {
@@ -2541,6 +2604,7 @@ private class AudioRenderer(
                 .coerceAtMost(startThresholdBytes.toLong()).toInt()
             lastPcmWriteNs = System.nanoTime()
             rebufferCount++
+            anomaly("REBUFFER_PAUSE", "pauseNs=$pauseNs retainedBytes=$prebufferBytes count=$rebufferCount")
             if (rebufferPauseReportCount < MAX_REBUFFER_REPORTS) {
                 rebufferPauseReportCount++
                 val retainedMs = if (bytesPerSecond > 0) prebufferBytes * 1000L / bytesPerSecond else 0L
@@ -2581,8 +2645,10 @@ private class AudioRenderer(
     // Persist counters even during packet starvation, and flush before disconnect releases the track.
     private fun logStatsIfDue(force: Boolean = false) {
         val now = System.nanoTime()
+        if (force) runCatching { report("Audio: timing renderer=${evidence.id} ended=true ${evidence.summary()}") }
         if (statsWindowStartNs == 0L) statsWindowStartNs = now
         if (!force && now - statsWindowStartNs < STATS_WINDOW_NS) return
+        runCatching { report("Audio: timing renderer=${evidence.id} ended=$force windowStartNs=$statsWindowStartNs windowEndNs=$now ${evidence.windowSummary()}") }
         val underruns = track?.underrunCount ?: 0
         val lastRx = lastArrivalNs.get()
         val currentTrack = track
@@ -2599,7 +2665,7 @@ private class AudioRenderer(
         // "PHONE " marks the iPhone's own log lines, which the report drops, and it dropped every
         // call's playback line with it (#647).
         val channelName = if (mappedChannel == AudioChannel.PHONE) "CALL" else mappedChannel?.name
-        val line = "audio stats audioType=${format.audioType} channel=$channelName " +
+        val line = "audio stats renderer=${evidence.id} audioType=${format.audioType} channel=$channelName " +
             "routeType=${currentTrack?.routedDevice?.type ?: -1} codec=${format.codec} " +
             "trackState=${currentTrack?.state ?: -1} playState=${currentTrack?.playState ?: -1} " +
             "sampleRate=${currentTrack?.sampleRate ?: format.sampleRate} " +

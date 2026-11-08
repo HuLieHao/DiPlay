@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_board_mfi">内蔵 MFi チップ（実験的機能）</string>
+    <string name="settings_board_mfi_description">内蔵認証チップを使用します。次回接続時に適用され、ソフトウェア認証には自動で戻りません。戻すにはローカル認証を選択してください。</string>
+</resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="waiting_availability_timeout">Автентифікацію пройдено, але iPhone не запустив CarPlay протягом 30 секунд</string>
+    <string name="connection_help_availability">Розблокуйте iPhone і перевірте запит CarPlay. Якщо з’єднання не встановлено, повторіть спробу.</string>
+</resources>

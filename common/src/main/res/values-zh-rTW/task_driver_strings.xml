@@ -2,10 +2,8 @@
     <string name="task_connection_management">連線管理</string>
     <string name="task_carplay">CarPlay</string>
     <string name="settings_clock">系統時鐘</string>
-    <string name="settings_clock_off">關閉</string>
-    <string name="settings_clock_left">左下方</string>
-    <string name="settings_clock_right">右下方</string>
     <string name="settings_clock_size">時鐘字級</string>
-    <string name="settings_clock_description">使用車機系統時間，並非 iPhone 時鐘。返回 CarPlay 時生效。已預留 Dock 空間，請停車後確認位置。</string>
+    <string name="settings_clock_description">固定在左下方，使用系統時間。透明底，跟隨 CarPlay 日夜模式：日間黑字、夜間白字。修改日夜模式後返回 CarPlay 生效，無需重新連線。</string>
     <string name="settings_clock_unknown">時間未知 —</string>
+    <string name="disconnecting_carplay">正在中斷 CarPlay…</string>
 </resources>

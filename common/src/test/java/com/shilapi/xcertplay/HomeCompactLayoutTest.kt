@@ -17,12 +17,12 @@ import org.robolectric.util.ReflectionHelpers
 @Config(sdk = [29])
 class HomeCompactLayoutTest {
     @Config(qualifiers = "en-w900dp-h400dp-land")
-    @Test fun compactLandscapeKeepsWirelessAndUsbInSeparateColumns() {
+    @Test fun compactLandscapeKeepsWirelessAndSettingsInSeparateColumns() {
         verifyCompactArrangement(landscape = true)
     }
 
     @Config(qualifiers = "en-w400dp-h900dp-port")
-    @Test fun compactPortraitStacksWirelessBeforeUsb() {
+    @Test fun compactPortraitStacksWirelessBeforeSettings() {
         verifyCompactArrangement(landscape = false)
     }
 
@@ -40,11 +40,14 @@ class HomeCompactLayoutTest {
         fun text(id: Int) = descendants(root).filterIsInstance<TextView>()
             .single { it.text == activity.getString(id) }
         val connect = text(R.string.connect_phone)
-        val usb = text(R.string.connect_with_usb)
+        assertFalse(descendants(root).filterIsInstance<TextView>().any {
+            it.text == activity.getString(R.string.connect_with_usb)
+        })
+        val settings = text(R.string.settings)
         val connectPosition = IntArray(2).also(connect::getLocationOnScreen)
-        val usbPosition = IntArray(2).also(usb::getLocationOnScreen)
-        if (landscape) assertTrue(usbPosition[0] >= connectPosition[0] + connect.width)
-        else assertTrue(usbPosition[1] >= connectPosition[1] + connect.height)
+        val settingsPosition = IntArray(2).also(settings::getLocationOnScreen)
+        if (landscape) assertTrue(settingsPosition[0] >= connectPosition[0] + connect.width)
+        else assertTrue(settingsPosition[1] >= connectPosition[1] + connect.height)
         assertTrue(text(R.string.car_home).visibility == View.VISIBLE)
         assertFalse(descendants(root).filterIsInstance<TextView>().any {
             it.text == activity.getString(R.string.a_familiar_drive) ||

@@ -18,6 +18,75 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29])
 class CarPlayClockOverlayTest {
+    @Test fun diagnosticSnapshotExplainsVisibilityGeometryAndInvalidClockWithoutPolling() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        var now = 1_800_000_000_000L
+        var reads = 0
+        val overlay = CarPlayClockOverlay(activity, Handler(Looper.getMainLooper())) { reads++; now }
+        val root = FrameLayout(activity)
+        activity.setContentView(root)
+        root.addView(overlay)
+        CarPlayClockSettings.save(activity, 20)
+        overlay.setVideoContentBounds(android.graphics.RectF(20f, 100f, 1980f, 958f))
+        overlay.update(true, false)
+        var report = CarPlayClockOverlay.diagnosticReport()
+        assertTrue(report.contains("visible=true"))
+        assertTrue(report.contains("reason=visible"))
+        assertTrue(report.contains("bounds=20,812,118,56"))
+        assertTrue(report.contains("clockValid=true"))
+        assertTrue(report.contains("textColor=#FF000000"))
+        assertTrue(report.contains("textSizePx=32.0"))
+        now = 0L
+        overlay.update(true, true)
+        report = CarPlayClockOverlay.diagnosticReport()
+        assertTrue(report.contains("clockValid=false"))
+        assertTrue(report.contains("textColor=#FFFFFFFF"))
+        overlay.update(false, true, "menu_open")
+        report = CarPlayClockOverlay.diagnosticReport()
+        assertTrue(report.contains("visible=false"))
+        assertTrue(report.contains("reason=menu_open"))
+        val before = reads
+        repeat(10) { CarPlayClockOverlay.diagnosticReport() }
+        assertEquals(before, reads)
+        root.removeView(overlay)
+        assertTrue(CarPlayClockOverlay.diagnosticReport().contains("reason=detached"))
+        activity.finish()
+    }
+
+    @Test fun clockAlwaysFollowsCarPlayEvenWithAnOldIndependentPreference() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val prefs = activity.getSharedPreferences("xcertplay_airplay", 0)
+        val overlay = CarPlayClockOverlay(activity, Handler(Looper.getMainLooper()))
+        CarPlayClockSettings.save(activity)
+        for ((mode, night, expected) in listOf(
+            Triple("auto", true, android.graphics.Color.WHITE),
+            Triple("auto", false, android.graphics.Color.BLACK),
+            Triple("dark", false, android.graphics.Color.BLACK),
+            Triple("light", true, android.graphics.Color.WHITE))) {
+            prefs.edit().putString("carplay_clock_appearance", mode).apply()
+            overlay.update(true, night)
+            assertEquals("mode=$mode hostNight=$night", expected, overlay.currentTextColor)
+        }
+        overlay.update(false, false)
+    }
+
+    @Test fun legacyPositionsCannotHideClock() {
+        val controller = Robolectric.buildActivity(Activity::class.java).setup()
+        val activity = controller.get()
+        val prefs = activity.getSharedPreferences("xcertplay_airplay", 0)
+        val overlay = CarPlayClockOverlay(activity, Handler(Looper.getMainLooper()))
+        try {
+            prefs.edit().putString("carplay_clock_position", "right").apply()
+            overlay.setVideoContentBounds(android.graphics.RectF(30f, 40f, 1990f, 898f))
+            overlay.update(true, false)
+            assertEquals(30, (overlay.layoutParams as FrameLayout.LayoutParams).leftMargin)
+            assertEquals(View.VISIBLE, overlay.visibility)
+            prefs.edit().putString("carplay_clock_position", "off").apply()
+            overlay.update(true, false)
+            assertEquals(View.VISIBLE, overlay.visibility)
+        } finally { overlay.update(false, false); controller.pause().stop().destroy() }
+    }
+
     @Test fun repeatedShowHideAndDetachDoesNotAccumulateMinuteCallbacks() {
         val controller = Robolectric.buildActivity(Activity::class.java).setup()
         val activity = controller.get()
@@ -25,7 +94,7 @@ class CarPlayClockOverlayTest {
         var reads = 0
         val root = FrameLayout(activity)
         activity.setContentView(root)
-        CarPlayClockSettings.save(activity, "left", 20)
+        CarPlayClockSettings.save(activity, 20)
         repeat(24) {
             val overlay = CarPlayClockOverlay(activity, handler) { reads++; 1_800_000_000_000L }
             overlay.setVideoContentBounds(android.graphics.RectF(0f, 0f, 1960f, 858f))
@@ -38,7 +107,7 @@ class CarPlayClockOverlayTest {
             overlay.update(false, true)
             root.removeView(overlay)
             val detached = reads
-            CarPlayClockSettings.save(activity, "right", 24)
+            CarPlayClockSettings.save(activity, 24)
             shadowOf(Looper.getMainLooper()).idleFor(2, TimeUnit.MINUTES)
             assertEquals(detached, reads)
         }
@@ -52,7 +121,7 @@ class CarPlayClockOverlayTest {
         try {
             val overlay = CarPlayClockOverlay(activity, Handler(Looper.getMainLooper())) { 1_800_018_000_000L } // 13:00 UTC
             overlay.setVideoContentBounds(android.graphics.RectF(0f, 0f, 1960f, 858f))
-            CarPlayClockSettings.save(activity, "left", 20)
+            CarPlayClockSettings.save(activity, 20)
             android.provider.Settings.System.putString(activity.contentResolver, android.provider.Settings.System.TIME_12_24, "24")
             overlay.update(true, false)
             assertEquals("13:00", overlay.text.toString())
@@ -67,17 +136,17 @@ class CarPlayClockOverlayTest {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val overlay = CarPlayClockOverlay(activity, Handler(Looper.getMainLooper()))
         overlay.setVideoContentBounds(android.graphics.RectF(0f, 0f, 1960f, 858f))
-        CarPlayClockSettings.save(activity, "left", 20)
+        CarPlayClockSettings.save(activity, 20)
         overlay.update(true, false)
         overlay.setVideoContentBounds(android.graphics.RectF(20f, 100f, 1980f, 958f))
         val params = overlay.layoutParams as FrameLayout.LayoutParams
         assertEquals(118, params.width)
         assertEquals(20, params.leftMargin)
-        assertEquals(700, params.topMargin)
-        assertEquals(168, params.height)
+        assertEquals(812, params.topMargin)
+        assertEquals(56, params.height)
         assertEquals(868, params.topMargin + params.height)
         assertEquals(32f, overlay.textSize, .01f)
-        assertEquals(android.graphics.Color.WHITE, overlay.currentTextColor)
+        assertEquals(android.graphics.Color.BLACK, overlay.currentTextColor)
         assertEquals(android.graphics.Color.TRANSPARENT, (overlay.background as android.graphics.drawable.ColorDrawable).color)
         assertEquals(0f, overlay.shadowRadius, .01f)
         val originalScaledDensity = activity.resources.displayMetrics.scaledDensity
@@ -87,10 +156,10 @@ class CarPlayClockOverlayTest {
         overlay.setVideoContentBounds(android.graphics.RectF(40f, 200f, 1020f, 629f))
         assertEquals(16f, overlay.textSize, .01f)
         assertEquals(0f, overlay.shadowRadius, .01f)
-        CarPlayClockSettings.save(activity, "right", 24)
+        CarPlayClockSettings.save(activity, 24)
         overlay.update(true, false)
         val right = overlay.layoutParams as FrameLayout.LayoutParams
-        assertEquals(961, right.leftMargin)
+        assertEquals(40, right.leftMargin)
         assertTrue(overlay.textSize in 16f..19.2f)
         assertTrue(overlay.paint.measureText("00:00") <= right.width + .01f)
         overlay.update(false, false)
@@ -98,16 +167,15 @@ class CarPlayClockOverlayTest {
         activity.finish()
     }
 
-    @Test fun clockIsOptInClampedAndInvalidTimeIsExplicit() {
+    @Test fun clockIsAlwaysShownClampedAndInvalidTimeIsExplicit() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val overlay = CarPlayClockOverlay(activity, Handler(Looper.getMainLooper())) { 0L }
         overlay.setVideoContentBounds(android.graphics.RectF(0f, 0f, 1960f, 858f))
-        assertEquals("off", CarPlayClockSettings.position(activity))
-        CarPlayClockSettings.save(activity, "bad", 300)
-        assertEquals("off", CarPlayClockSettings.position(activity))
+        CarPlayClockSettings.save(activity, 300)
         assertEquals(24, CarPlayClockSettings.size(activity))
-        CarPlayClockSettings.save(activity, "right", 20)
+        CarPlayClockSettings.save(activity, 20)
         overlay.update(true, false)
+        assertEquals(View.VISIBLE, overlay.visibility)
         assertTrue(overlay.text.toString().contains("—"))
         assertFalse(overlay.isClickable)
         assertFalse(overlay.isFocusable)
@@ -125,7 +193,7 @@ class CarPlayClockOverlayTest {
         val root = FrameLayout(activity)
         root.addView(overlay)
         activity.setContentView(root)
-        CarPlayClockSettings.save(activity, "left", 16)
+        CarPlayClockSettings.save(activity, 16)
         overlay.update(true, false)
         val initial = reads
         now += 39_999
@@ -154,19 +222,19 @@ class CarPlayClockOverlayTest {
         val root = FrameLayout(activity)
         root.addView(overlay)
         activity.setContentView(root)
-        CarPlayClockSettings.save(activity, "left", 16)
+        CarPlayClockSettings.save(activity, 16)
         overlay.update(true, false)
-        CarPlayClockSettings.save(activity, "right", 24)
+        CarPlayClockSettings.save(activity, 24)
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue(overlay.textSize in 32f..38.4f)
         val params = overlay.layoutParams as FrameLayout.LayoutParams
         assertEquals(android.view.Gravity.TOP or android.view.Gravity.LEFT, params.gravity)
         val dayColor = overlay.currentTextColor
         overlay.update(true, true)
-        assertEquals(dayColor, overlay.currentTextColor)
+        assertNotEquals(dayColor, overlay.currentTextColor)
         assertEquals(android.graphics.Color.WHITE, overlay.currentTextColor)
         overlay.update(false, true)
-        CarPlayClockSettings.save(activity, "left", 16)
+        CarPlayClockSettings.save(activity, 16)
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue(overlay.textSize in 32f..38.4f)
         activity.finish()
@@ -182,7 +250,7 @@ class CarPlayClockOverlayTest {
         root.addView(video, FrameLayout.LayoutParams(-1, -1))
         root.addView(overlay)
         activity.setContentView(root)
-        CarPlayClockSettings.save(activity, "right", 24)
+        CarPlayClockSettings.save(activity, 24)
         overlay.update(true, false)
         root.measure(View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(480, View.MeasureSpec.EXACTLY))
         root.layout(0, 0, 800, 480)

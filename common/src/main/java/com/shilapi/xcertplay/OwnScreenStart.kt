@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.content.Intent
 import android.util.Log
 
@@ -14,6 +15,29 @@ import android.util.Log
  */
 internal object OwnScreenStart {
     private const val TAG = "DiPlay"
+
+    fun homeIntent(activity: Activity, page: String = "home") =
+        Intent(activity, DiPlayActivity::class.java).putExtra("page", page)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
+    /** Also removes empty recent cards and hosts which never reached session ownership. */
+    fun removeCarPlayTasks(activity: Activity) {
+        val tasks = activity.getSystemService(ActivityManager::class.java)?.appTasks ?: return
+        for (task in tasks) {
+            runCatching {
+                val info = task.taskInfo ?: return@runCatching
+                val root = info.baseIntent.component ?: return@runCatching
+                if (root.packageName != activity.packageName ||
+                    root.className != CarPlayHostActivity::class.java.name) return@runCatching
+                // Older builds could put the management page inside the projection task.
+                // Move it to its own task before removing that entire old stack.
+                @Suppress("DEPRECATION")
+                if (info.id == activity.taskId && !start(activity, homeIntent(activity))) return@runCatching
+                task.finishAndRemoveTask()
+            }.onFailure { Log.w(TAG, "Could not remove stopped CarPlay task", it) }
+        }
+    }
 
     fun start(activity: Activity, intent: Intent, log: (String) -> Unit = { Log.w(TAG, it) }): Boolean {
         val screen = intent.component?.className?.substringAfterLast('.') ?: "screen"

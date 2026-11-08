@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_capture_stop">停止采集</string>
+    <string name="settings_capture_stop_first">请先停止采集，再保存或下载诊断报告。</string>
+    <string name="settings_capture_status">详细采集 · %1$d 秒</string>
+    <string name="settings_capture_hint">打开应用后自动采集。复现问题后停止采集，再下载诊断报告。</string>
+    <string name="settings_capture_heavy_audio">音频详细快照与线程扫描</string>
+    <string name="settings_capture_heavy_audio_description">采集中即时生效。开启时收集音频服务转储和线程明细；关闭时跳过这些操作，保留原始音频事件、PCAP 和轻量统计。正在进行的探测将取消，无需重连。</string>
+</resources>

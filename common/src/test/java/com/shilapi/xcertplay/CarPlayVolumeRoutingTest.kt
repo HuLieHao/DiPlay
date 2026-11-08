@@ -16,6 +16,19 @@ import java.util.concurrent.TimeUnit
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [27])
 class CarPlayVolumeRoutingTest {
+    @Test fun gisKeysReportChosenStreamAndReadbackOncePerInitialPress() {
+        WheelKeyLog.reset()
+        var current = 4
+        val route = CarPlayVolumeKeyRouter({ 11 }, { 0 }, { 10 }, { current },
+            { _, value, _ -> current = value }, { _, _, _ -> })
+        assertTrue(route.onKey(0, 24, 1, 100, 0))
+        assertTrue(route.onKey(0, 24, 1, 100, 1))
+        assertTrue(route.onKey(1, 24, 1, 100, 0))
+        val lines = WheelKeyLog.report(false).filter { "volume host" in it }
+        assertEquals(1, lines.size)
+        assertTrue(lines.single(), lines.single().contains("stream=11 current=4 target=5 readback=5 handled=true"))
+    }
+
     @Test fun pairedKeysWriteOnlyChosenStreamAtStepOneWithoutSystemUiAndKeepUpDuringCall() {
         var stream: Int? = 5
         val volumes = mutableMapOf(3 to 8, 5 to 4)

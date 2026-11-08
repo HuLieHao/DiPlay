@@ -28,8 +28,6 @@
     <string name="waiting_phase_picture">映像</string>
     <string name="waiting_steps_title">接続手順</string>
     <string name="waiting_network_title">ネットワークの状態</string>
-    <string name="waiting_details_show">接続の詳細</string>
-    <string name="waiting_details_hide">詳細を非表示</string>
     <string name="waiting_current_time">現在の段階：%1$d秒</string>
     <string name="waiting_total_attempt">合計：%1$d秒 · 試行%2$d回目</string>
     <string name="waiting_duration">%1$.1f秒</string>

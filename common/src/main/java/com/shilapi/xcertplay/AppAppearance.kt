@@ -30,6 +30,7 @@ internal fun resolveAppNight(
         CarPlayNightMode.DAY -> false
         CarPlayNightMode.NIGHT -> true
         CarPlayNightMode.SCHEDULE -> schedule.isNight(minuteOfDay)
+        CarPlayNightMode.VEHICLE -> false
         CarPlayNightMode.SYSTEM, CarPlayNightMode.AMBIENT -> systemNight
     }
 }

@@ -11,6 +11,104 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 class WirelessStartupWatchdogTest {
+    @Test fun availabilityFailureIsTypedAndTerminationCancelsIt() {
+        val reasons = mutableListOf<WirelessStartupFailure>()
+        val watch = WirelessStartupWatchdog(identity, { delay, action ->
+            deadline = now + delay; timer = action; { deadline = null }
+        }, { reasons.add(it) }, { now * 1_000_000 })
+        watch.progress(ConnectionMilestone.AUTHENTICATED)
+        now = 30_000
+        timer!!()
+        assertEquals(listOf(WirelessStartupFailure.AVAILABILITY_TIMEOUT), reasons)
+        val stopped = watchdog()
+        stopped.progress(ConnectionMilestone.AUTHENTICATED)
+        val stale = requireNotNull(timer)
+        stopped.terminate()
+        stale()
+        assertEquals(0, failures)
+    }
+
+    @Test fun authenticatedBootstrapWithoutAvailabilityHasBoundedWait() {
+        val watch = watchdog()
+        watch.progress(ConnectionMilestone.AUTHENTICATED)
+        assertEquals(30_000L, deadline)
+        now = 20_000
+        watch.progress(ConnectionMilestone.AUTHENTICATED)
+        watch.progress(ConnectionMilestone.WIFI_CONFIG_SENT)
+        assertEquals(30_000L, deadline)
+        now = 30_000
+        timer!!()
+        assertEquals(1, failures)
+        assertTrue(watch.terminated)
+    }
+
+    @Test fun availabilityDeadlineIsReplacedByStartAndCannotKillHealthySession() {
+        val watch = watchdog()
+        watch.progress(ConnectionMilestone.AUTHENTICATED)
+        val oldTimer = requireNotNull(timer)
+        now = 500
+        assertTrue(watch.startSessionSent(now * 1_000_000))
+        assertEquals(20_500L, deadline)
+        watch.accepted(event())
+        watch.sessionEstablished()
+        watch.frameRendered()
+        now = 40_000
+        oldTimer()
+        assertEquals(0, failures)
+    }
+
+    @Test fun legacyTcpArrivalBeforeStartCancelsAvailabilityDeadline() {
+        val watch = watchdog()
+        watch.progress(ConnectionMilestone.AUTHENTICATED)
+        val oldTimer = requireNotNull(timer)
+        now = 500
+        assertTrue(watch.accepted(event()))
+        assertEquals(30_500L, deadline)
+        oldTimer()
+        assertEquals(0, failures)
+        watch.progress(ConnectionMilestone.AUTHENTICATED)
+        assertEquals(30_500L, deadline)
+    }
+
+    @Test fun delayedAvailabilityTimerCannotBeEvadedByLateStartOrTcp() {
+        val watch = watchdog()
+        watch.progress(ConnectionMilestone.AUTHENTICATED)
+        now = 30_001
+        assertFalse(watch.startSessionSent(now * 1_000_000))
+        assertFalse(watch.accepted(event()))
+        assertFalse(watch.sessionEstablished())
+        assertFalse(watch.frameRendered())
+        timer!!()
+        assertEquals(1, failures)
+    }
+
+    @Test fun waitCaptureTriggerOnlyForFirstStartBeforeObservedTcp() {
+        val watch = watchdog()
+        assertTrue(watch.startSessionSent(0))
+        assertFalse(watch.startSessionSent(1))
+        val acceptedFirst = watchdog()
+        acceptedFirst.accepted(event())
+        assertFalse(acceptedFirst.startSessionSent(2))
+        val terminated = watchdog()
+        terminated.terminate()
+        assertFalse(terminated.startSessionSent(3))
+    }
+
+    @Test fun firstTcpWaitIsTwentySecondsButAcceptedConnectionKeepsFullHandshakeBudget() {
+        val watch = watchdog()
+        watch.startSessionSent(0)
+        assertEquals(20_000L, deadline)
+        val oldTimer = timer!!
+        now = 19_999
+        watch.accepted(event())
+        assertEquals(49_999L, deadline)
+        oldTimer()
+        assertEquals(0, failures)
+        now = 49_999
+        timer!!()
+        assertEquals(1, failures)
+    }
+
     @Test fun acceptedTcpStillTimesOutWhenHandshakeNeverCompletes() {
         val watch = watchdog()
         watch.startSessionSent(0)
@@ -80,6 +178,88 @@ class WirelessStartupWatchdogTest {
         assertEquals(1, failures)
     }
 
+    @Test fun profileGraceKeepsListenerUntilAbsoluteDeadline() {
+        val watch = graceWatchdog()
+        watch.startSessionSent(0)
+        val old = timer!!
+        now = 20_000; old()
+        assertEquals(0, failures)
+        assertEquals(22_000L, deadline)
+        now = 21_750
+        assertTrue(watch.accepted(event()))
+        assertEquals(51_750L, deadline)
+        old()
+        assertEquals(0, failures)
+    }
+
+    @Test fun profileDelayedTimerCannotExtendGraceOrAdoptExpiredAccept() {
+        val watch = graceWatchdog()
+        watch.startSessionSent(0)
+        val queued = timer!!
+        now = 22_001
+        assertFalse(watch.accepted(event()))
+        queued(); queued()
+        assertEquals(1, failures)
+        assertTrue(watch.terminated)
+    }
+
+    @Test fun profileGraceRejectsForeignInternalAndCancelledAttempts() {
+        val watch = graceWatchdog()
+        watch.startSessionSent(0)
+        now = 20_000; timer!!()
+        assertFalse(watch.startSessionSent(now * 1_000_000))
+        assertFalse(watch.accepted(event(internal = true)))
+        assertFalse(watch.accepted(event(AirPlayListenerIdentity(8))))
+        assertEquals(22_000L, deadline)
+        now = 22_000; val expiry = timer!!; expiry(); expiry()
+        assertEquals(1, failures)
+        assertFalse(watch.accepted(event()))
+        val cancelled = graceWatchdog()
+        cancelled.startSessionSent(now * 1_000_000)
+        val stale = timer!!
+        cancelled.terminate(); stale()
+        assertFalse(cancelled.accepted(event()))
+        assertEquals(1, failures)
+    }
+
+    @Test fun profileGraceConcurrentAcceptAndQueuedFirstDeadlineKeepNormalSessionBudget() {
+        repeat(50) {
+            now = 0
+            val watch = graceWatchdog()
+            watch.startSessionSent(0)
+            val queued = timer!!
+            now = 21_750
+            val start = CountDownLatch(1)
+            val accepted = AtomicInteger()
+            val tcp = thread { start.await(); if (watch.accepted(event())) accepted.incrementAndGet() }
+            val timeout = thread { start.await(); queued() }
+            start.countDown(); tcp.join(2_000); timeout.join(2_000)
+            assertFalse(tcp.isAlive); assertFalse(timeout.isAlive)
+            assertEquals(1, accepted.get())
+            assertEquals(51_750L, deadline)
+            assertEquals(0, failures)
+            watch.terminate()
+        }
+    }
+
+    @Test fun profileExpiredAcceptTimestampAndDelayedDeliveryCannotBypassAbsoluteDeadline() {
+        val watch = graceWatchdog()
+        watch.startSessionSent(0)
+        now = 21_750
+        assertFalse(watch.accepted(AirPlayTcpAccepted(identity, false, 22_000_000_000)))
+        val earlyEvent = event()
+        now = 22_000
+        assertFalse(watch.accepted(earlyEvent))
+        assertFalse(watch.sessionEstablished())
+        assertFalse(watch.frameRendered())
+        timer!!()
+        assertEquals(1, failures)
+    }
+
+    private fun graceWatchdog() = WirelessStartupWatchdog(identity, { delay, action ->
+        deadline = now + delay; timer = action; { deadline = null }
+    }, { failures++ }, { now * 1_000_000 }, firstTcpGraceMillis = 2_000)
+
     private var now = 0L
     private var deadline: Long? = null
     private var timer: (() -> Unit)? = null
@@ -104,10 +284,10 @@ class WirelessStartupWatchdogTest {
     @Test fun repeatedStartDoesNotExtendDeadline() {
         val watch = watchdog()
         watch.startSessionSent(0)
-        now = 20_000
+        now = 10_000
         watch.startSessionSent(now * 1_000_000)
-        assertEquals(30_000L, deadline)
-        now = 30_000
+        assertEquals(20_000L, deadline)
+        now = 20_000
         timer!!()
         assertEquals(1, failures)
         assertTrue(watch.terminated)

@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_capture_stop">停止採集</string>
+    <string name="settings_capture_stop_first">請先停止採集，再儲存或下載診斷報告。</string>
+    <string name="settings_capture_status">詳細採集 · %1$d 秒</string>
+    <string name="settings_capture_hint">開啟應用程式後自動採集。重現問題後停止採集，再下載診斷報告。</string>
+    <string name="settings_capture_heavy_audio">音訊重度快照與執行緒掃描</string>
+    <string name="settings_capture_heavy_audio_description">採集中立即生效。開啟時收集音訊服務傾印和執行緒明細；關閉時略過這些操作，保留原始音訊事件、PCAP 和輕量統計。正在進行的探測將取消，無須重新連線。</string>
+</resources>

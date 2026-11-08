@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -157,7 +158,6 @@ class CarPlayHostActivity : ComponentActivity() {
     )
 
     private var connectionPanel: View? = null
-    private var connectionInstructionsView: TextView? = null
     private var connectionHelpView: TextView? = null
     private val waitingProgress = ConnectionWaitingProgress()
     private var waitingScreen: ConnectionWaitingView? = null
@@ -584,7 +584,7 @@ class CarPlayHostActivity : ComponentActivity() {
         createConfigurationContext(Configuration(resources.configuration).apply { setLocale(Locale.ENGLISH) })
             .resources
     }
-    private var darkMode = false
+    @Volatile private var darkMode = false
     private var appNight = true
     private var hostAppearanceResumed = false
     private var callPopupSessionReady = false
@@ -595,9 +595,17 @@ class CarPlayHostActivity : ComponentActivity() {
     private var ambientLightThreshold = AmbientLightThreshold()
     private var ambientDelaySeconds = 2
     private var nightModeDiagnosticSource = ThemeModeDiagnostics.Source.CARPLAY_MODE
-    private val nightModeController by lazy {
+    private val nightModeController: CarPlayNightModeController by lazy {
         CarPlayNightModeController(
             light = AndroidAmbientLight(this),
+            vehicle = VehicleIllumination(this) { appendLog(it) },
+            onResolution = { night, source ->
+                NightModeLastResult.publish(night, source)
+                appendLog("NIGHT_RESOLUTION night=$night source=$source " +
+                    "elapsedMs=${SystemClock.elapsedRealtime()} " +
+                    "sessionId=${activeAirPlaySession?.let { System.identityHashCode(it) }} " +
+                    "clockColor=${if (night) "white" else "black"} actualAppearance=unknown")
+            },
             scheduler = MainThreadNightModeScheduler(),
             initialNight = darkMode,
             onNightChanged = { night ->
@@ -607,7 +615,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 refreshAppAppearance()
                 paintWaitingScreen()
                 applyClusterTurnOverlay()
-                appendLog("CarPlay switched to ${if (night) "night" else "day"} mode")
+                appendLog("THEME_HOST_STATE ${nightModeController.diagnosticState()}")
                 logThemeState(nightModeDiagnosticSource, resources.configuration)
                 syncAirPlayDarkMode(nightModeDiagnosticSource)
             },
@@ -619,7 +627,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private val activeScreenStreamTypes = mutableSetOf<Int>()
     private var handshakeResetInProgress = false
     private var startAfterHandshakeReset = false
-    private var restartGeneration = 0
+    @Volatile private var restartGeneration = 0
     private var reconnectScheduled = false
     // The scheduled retry, and whether its failure asked the driver to turn Bluetooth on. Bluetooth
     // turning on then runs it at once, instead of after a back-off of up to 30 s.
@@ -627,13 +635,38 @@ class CarPlayHostActivity : ComponentActivity() {
     private var reconnectWaitsForBluetooth = false
     private val bluetoothOnReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) != BluetoothAdapter.STATE_ON) return
-            val retry = pendingReconnect ?: return
-            if (!reconnectScheduled || !reconnectWaitsForBluetooth) return
-            appendLog("Bluetooth turned on; retrying now")
-            mainHandler.removeCallbacks(retry)
-            mainHandler.post(retry)
+            when (intent.action) {
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) == BluetoothAdapter.STATE_ON &&
+                        reconnectWaitsForBluetooth) wakePendingReconnect("head_unit_bluetooth_on")
+                }
+                BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    if (!wirelessEnabled) return
+                    val device = androidx.core.content.IntentCompat.getParcelableExtra(intent,
+                        BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java) ?: return
+                    val selected = DiPlayPreferences.phoneAddress(this@CarPlayHostActivity) ?: return
+                    if (runCatching { device.address.equals(selected, ignoreCase = true) }.getOrDefault(false)) {
+                        wakePendingReconnect("selected_phone_acl_connected")
+                    }
+                }
+            }
         }
+    }
+    private var pendingReconnectAt = 0L
+
+    private fun wakePendingReconnect(source: String) {
+        checkWirelessWaitTimeout()
+        val retry = pendingReconnect ?: return
+        if (!reconnectScheduled || CarPlayBackgroundSession.active ||
+            CarPlayBackgroundSession.automaticConnectionTicket() == null ||
+            !CarPlayBackgroundSession.isOwner(this) || shuttingDown.get() ||
+            menuOpen || handshakeResetInProgress || startupRetryStopped) return
+        val remaining = (pendingReconnectAt - SystemClock.uptimeMillis()).coerceAtLeast(0)
+        // Multiple ACL broadcasts before the main queue runs still execute this runnable only once.
+        mainHandler.removeCallbacks(retry)
+        pendingReconnectAt = SystemClock.uptimeMillis()
+        appendLog("RECONNECT_WAKE source=$source remainingWaitMs=$remaining generation=$restartGeneration")
+        mainHandler.post(retry)
     }
     // How often the current controller reached its control loop, and whether a loss came after the
     // last time. A retry scheduled before the count went up leaves the attempt alone only while it is
@@ -644,7 +677,6 @@ class CarPlayHostActivity : ComponentActivity() {
     @Volatile private var adbNaviMode: com.shilapi.xcertplay.hud.BydClusterNaviMode? = null
     private var sessionLog: SessionLogFile? = null
     private var gestureFingerCount = 3
-    private var settingsGestureHint: TextView? = null
     private var gestureSequenceActive = false
     private var gestureTracking = false
     private var gestureStartX = 0f
@@ -841,10 +873,14 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (closeManuallyStoppedHost()) return
         AppTaskIdentity.apply(this, carPlay = true)
-        val bluetoothState = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        val bluetoothState = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED).apply {
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(bluetoothOnReceiver, bluetoothState, Context.RECEIVER_NOT_EXPORTED)
+            // Bluetooth broadcasts can originate from a privileged UID other than system.
+            registerReceiver(bluetoothOnReceiver, bluetoothState, Context.RECEIVER_EXPORTED)
         } else {
             registerReceiver(bluetoothOnReceiver, bluetoothState)
         }
@@ -988,6 +1024,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun requestStartupPrerequisites() {
+        if (closeManuallyStoppedHost()) return
         if (locationReportingEnabled && !locationPermissionAvailable) {
             requestLocationPermission()
             return
@@ -1183,6 +1220,8 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        checkWirelessWaitTimeout()
+        if (closeManuallyStoppedHost()) return
         WheelKeyService.restoreIfNeeded(this)
         hostAppearanceResumed = true
         CarPlayVolumeDisplay.canShow = {
@@ -1256,7 +1295,6 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         if (!menuOpen) gestureFingerCount = AirPlayPersistence.loadSettingsGestureFingers(this)
         if (!menuOpen) temporarySystemBarsEnabled = AirPlayPersistence.loadTemporarySystemBars(this)
-        settingsGestureHint?.text = settingsGestureHintText()
         ensureClusterPresentation()
         AirPlayPersistence.overlaySettingsListener = { runOnUiThread { applyClusterTurnOverlay() } }
         com.shilapi.xcertplay.hud.BydNavigationOutputs.setTurnOverlayListener(clusterTurnOverlayListener)
@@ -1848,7 +1886,7 @@ class CarPlayHostActivity : ComponentActivity() {
     override fun onPause() {
         cancelTemporarySystemBars()
         hostAppearanceResumed = false
-        clockOverlay?.update(false, darkMode)
+        clockOverlay?.update(false, darkMode, "host_paused")
         CarPlayVolumeDisplay.show = null
         CarPlayVolumeDisplay.canShow = null
         volumeOverlay?.stop()
@@ -2017,6 +2055,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private var clockOverlay: CarPlayClockOverlay? = null
+    private var lastClockThemeDiagnostic: Pair<Boolean, Boolean>? = null
     private var volumeOverlay: CarPlayVolumeOverlay? = null
 
     private fun buildContentView(): View {
@@ -2056,8 +2095,6 @@ class CarPlayHostActivity : ComponentActivity() {
         waitingScreen = waiting
         wifiRecoveryButton = waiting.recoveryButton
         startupRetryButton = waiting.retryButton
-        settingsGestureHint = waiting.gestureHint
-        waiting.gestureHint.text = settingsGestureHintText()
         paintWaitingScreen = { waiting.applyPalette(DiPlayPalette.of(appNight)) }
         paintWaitingScreen()
         root.addView(waiting, FrameLayout.LayoutParams(-1, -1))
@@ -2086,7 +2123,6 @@ class CarPlayHostActivity : ComponentActivity() {
         gestureOverlay = gestureLayer
         stageStatusView = waiting.stage
         connectionPanel = waiting
-        connectionInstructionsView = waiting.instructions
         connectionHelpView = waiting.help
         updateDebugOverlays()
         return root
@@ -2754,10 +2790,6 @@ class CarPlayHostActivity : ComponentActivity() {
             for (index in 0 until root.childCount) yieldAll(findDescendants(root.getChildAt(index)))
         }
     }
-
-    private fun settingsGestureHintText(): String =
-        if (gestureFingerCount == 0) getString(R.string.settings_gesture_disabled_hint)
-        else getString(R.string.open_diplay_settings_hint, gestureFingerCount)
 
     private fun settingsGestureButtonText(): String =
         if (gestureFingerCount == 0) getString(R.string.settings_gesture_disabled_action)
@@ -3550,6 +3582,10 @@ class CarPlayHostActivity : ComponentActivity() {
         ) { target ->
             if (mfiTarget == target) return@createMfiTargetChoice
             mfiTarget = target
+            if (target == MfiTarget.I2C && ConnectionSettingsSection.boardMfiAvailable(this)) {
+                mfiI2cPath = ConnectionSettingsSection.BOARD_MFI_PATH
+                mfiI2cPathInput?.setText(mfiI2cPath)
+            }
             updateMfiTargetFields()
             appendLog("MFI target: ${mfiTargetLabel(target)}; applies when settings close")
         }
@@ -5213,6 +5249,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun createSessionListener(controllerGeneration: Int): AirPlaySessionListener =
         object : AirPlaySessionListener {
+            override fun currentAppearanceNight(): Boolean = darkMode
             private val diagnosticLog = sessionLog
 
             override fun onCornerMask(session: AirPlaySession, png: ByteArray, displayWidth: Int) {
@@ -5240,6 +5277,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     stageStatusView?.text = getString(R.string.waiting_step_frame)
                     updateDebugOverlays()
                     CarPlayBackgroundSession.active = true
+                    mainHandler.removeCallbacks(wirelessWaitTimeout)
                     showConnectionHelp(null)
                     callPopupSessionReady = true
                     updateCallPopupGuard()
@@ -5286,6 +5324,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     activeAirPlaySession = null
                     clearIphoneCornerMask()
                     CarPlayBackgroundSession.active = false
+                    armWirelessWaitTimeout()
                     callPopupSessionReady = false
                     updateCallPopupGuard()
                     if (menuOpen) {
@@ -5319,23 +5358,13 @@ class CarPlayHostActivity : ComponentActivity() {
             }
 
             override fun onDebugLog(message: String) {
-                if (DiagnosticRedactor.redact(message) == null) return
-                if (ConnectionDiagnosticPolicy.retainAfterGenerationChange(message)) {
-                    // Retain old-controller teardown evidence without accepting its UI/session state.
-                    AsyncDiagnosticLog.append(diagnosticLog, "controllerGeneration=$controllerGeneration $message")
-                    return
-                }
+                // Persist every original message to the listener's captured session before UI gates.
+                // Opening settings or replacing a controller must not discard connection evidence.
+                AsyncDiagnosticLog.append(diagnosticLog, "controllerGeneration=$controllerGeneration $message")
+                if (ConnectionDiagnosticPolicy.retainAfterGenerationChange(message)) return
                 runOnUiThread {
-                    if (controllerGeneration != restartGeneration) {
-                        return@runOnUiThread
-                    }
+                    if (controllerGeneration != restartGeneration) return@runOnUiThread
                     DisplayDiagnosticSnapshot.record(this@CarPlayHostActivity, displayDiagnosticAttempt, message)
-                    if (menuOpen) return@runOnUiThread
-                    if (message.startsWith(PROTOCOL_TRACE_PREFIX)) {
-                        appendFileLog(message)
-                    } else {
-                        appendLog(message)
-                    }
                 }
             }
         }
@@ -5351,6 +5380,7 @@ class CarPlayHostActivity : ComponentActivity() {
             lossSinceControlRunning = true
         }
         if (status is CarPlayStatus.Failed || status is CarPlayStatus.ControlEnded) {
+            armWirelessWaitTimeout()
             callPopupSessionReady = false
             updateCallPopupGuard()
         }
@@ -5432,9 +5462,10 @@ class CarPlayHostActivity : ComponentActivity() {
             this, snapshot.display) { completion ->
             runOnUiThread {
                 shutdown(false, "DiPlay disconnect", completion)
-                finish()
+                finishDisconnectedHost()
             }
         }
+        if (!CarPlayBackgroundSession.active) armWirelessWaitTimeout()
         callPopupSessionReady = CarPlayBackgroundSession.callPopupReady
         updateCallPopupGuard()
         if (snapshot.width > 0 && snapshot.height > 0) {
@@ -5494,14 +5525,16 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun startCarPlay(size: DisplaySize) {
+        if (closeManuallyStoppedHost()) return
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) return
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress || controller != null) return
         val controllerGeneration = restartGeneration
         if (sessionLog == null) initializeSessionLog()
         sessionLog = sessionLog!!.connectionRun(controllerGeneration)
         appendLog("session_connection_run_started controllerGeneration=$controllerGeneration")
-        // Settings → Connection can change the target while this screen stays open (#696).
+        // Settings → Connection can change both target and bus while this screen stays open.
         mfiTarget = AirPlayPersistence.loadMfiTarget(this)
+        mfiI2cPath = AirPlayPersistence.loadMfiI2cPath(this)
         runCatching { DiPlayBootstrap.ensure(this, mfiTarget) }
         val config = createRuntimeConfig()
         val effectiveSize = if (isMultiWindowActive() && !AirPlayPersistence.loadAdaptPipResolution(this) &&
@@ -5566,6 +5599,7 @@ class CarPlayHostActivity : ComponentActivity() {
             airPlayConfig = airPlayConfig,
             identity = airPlayIdentity,
             pairings = pairings,
+            addressPreference = CarPlayBackgroundSession.addressPreference,
             listener = createSessionListener(controllerGeneration),
             media = media,
             reportStatus = createStatusReporter(controllerGeneration),
@@ -5595,10 +5629,11 @@ class CarPlayHostActivity : ComponentActivity() {
         CarPlayBackgroundSession.store(next, renderer, size.width, size.height, this, display) { completion ->
             runOnUiThread {
                 shutdown(terminateProcess = false, reason = "DiPlay disconnect", completion = completion)
-                finish()
+                finishDisconnectedHost()
             }
         }
         CarPlayBackgroundSession.attachDiagnosticLog(next, sessionLog)
+        armWirelessWaitTimeout()
         try {
             ContextCompat.startForegroundService(this, Intent(this, DiPlaySessionService::class.java))
             next.start()
@@ -5637,6 +5672,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun syncAirPlayDarkMode(source: ThemeModeDiagnostics.Source) {
         val session = activeAirPlaySession
         val night = darkMode
+        appendLog("THEME_CONTEXT trigger=${source.label} elapsedMs=${SystemClock.elapsedRealtime()} " +
+            "sessionId=${session?.let { System.identityHashCode(it) }} ${nightModeController.diagnosticState()}")
         if (session == null) {
             appendLog("THEME_DIAGNOSTIC request source=${source.label} applied=${if (night) "dark" else "light"} sessionActive=false")
             return
@@ -5909,6 +5946,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun maybeStartCarPlay() {
+        if (closeManuallyStoppedHost()) return
         if (shuttingDown.get()) return
         val sessionRevision = CarPlayBackgroundSession.revision()
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) {
@@ -5958,19 +5996,53 @@ class CarPlayHostActivity : ComponentActivity() {
         startCarPlay(size)
     }
 
+    private val wirelessWaitTimeout = Runnable { checkWirelessWaitTimeout() }
+
+    private fun armWirelessWaitTimeout() {
+        if (!wirelessEnabled || shuttingDown.get() ||
+            CarPlayBackgroundSession.automaticConnectionTicket() == null) return
+        val now = SystemClock.elapsedRealtime()
+        val started = CarPlayBackgroundSession.wirelessWaitStartedAt ?: now.also {
+            CarPlayBackgroundSession.wirelessWaitStartedAt = it
+            appendLog("WIRELESS_WAIT started elapsedMs=$it limitMs=300000")
+        }
+        mainHandler.removeCallbacks(wirelessWaitTimeout)
+        mainHandler.postDelayed(wirelessWaitTimeout, (300_000L - (now - started)).coerceAtLeast(0))
+    }
+
+    private fun checkWirelessWaitTimeout() {
+        if (!CarPlayBackgroundSession.isOwner(this) || shuttingDown.get() ||
+            CarPlayBackgroundSession.automaticConnectionTicket() == null) return
+        if (CarPlayBackgroundSession.active) {
+            CarPlayBackgroundSession.wirelessWaitStartedAt = null
+            return
+        }
+        val started = CarPlayBackgroundSession.wirelessWaitStartedAt ?: return
+        val elapsed = SystemClock.elapsedRealtime() - started
+        if (elapsed < 300_000L) { armWirelessWaitTimeout(); return }
+        appendLog("WIRELESS_WAIT expired elapsedMs=$elapsed action=stop_and_return_to_management manual_restart_required=true")
+        CarPlayBackgroundSession.stop()
+        if (!isFinishing) finishDisconnectedHost()
+    }
+
     private fun reconnectAfterLoss(
         reason: String,
         startupFailure: WirelessStartupFailure? = null,
         englishReason: String = reason,
     ) {
+        if (CarPlayBackgroundSession.automaticConnectionTicket() == null) return
         if (!CarPlayBackgroundSession.isOwner(this)) return
+        armWirelessWaitTimeout()
         // Also when a retry is already pending and this loss is dropped: that retry must not skip.
         lossSinceControlRunning = true
         if (menuOpen) recoveryPendingAfterMenu = true
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress || startupRetryStopped) return
         if (reconnectScheduled) return
         val startupDelay = if (startupFailure != null && startupFailure.retryable)
-            startupRetryBudget.nextDelayMillis() else null
+            startupRetryBudget.nextDelayMillis(
+                com.shilapi.xcertplay.network.WirelessStartupPolicy.fastWireless(Build.MODEL, Build.HARDWARE, Build.VERSION.SDK_INT),
+                startupFailure,
+            ) else null
         if (startupFailure != null && startupDelay == null) {
             startupRetryStopped = true
             startupRetryButton?.visibility = View.VISIBLE
@@ -5998,16 +6070,21 @@ class CarPlayHostActivity : ComponentActivity() {
         } else if (reason.contains("AirPlay iAP tunnel", ignoreCase = true)) {
             IAP_TUNNEL_RECONNECT_DELAY_MILLIS
         } else {
-            (RECONNECT_DELAY_MILLIS * (1L shl reconnectAttempts.coerceAtMost(4))).coerceAtMost(30_000L)
+            (RECONNECT_DELAY_MILLIS * (1L shl reconnectAttempts.coerceAtMost(4)))
+                .coerceAtMost(if (wirelessEnabled) 10_000L else 30_000L)
         }
         reconnectAttempts += 1
         waitingProgress.retry(delayMillis, reason)
         updateDebugOverlays()
-        appendLog("$reason; retrying in ${delayMillis}ms generation=$generation startupFailure=$startupFailure startupRetries=${startupRetryBudget.retries}")
+        val creditedFirstTcp = startupFailure == WirelessStartupFailure.FIRST_TCP_TIMEOUT &&
+            com.shilapi.xcertplay.network.WirelessStartupPolicy.fastWireless(Build.MODEL, Build.HARDWARE, Build.VERSION.SDK_INT)
+        appendLog("$reason; retrying in ${delayMillis}ms generation=$generation startupFailure=$startupFailure startupRetries=${startupRetryBudget.retries}" +
+            if (creditedFirstTcp) " policy=FF5000_IPV4 nominalBackoffMs=${delayMillis + 2_000} graceCreditMs=2000 cleanupRequired=true" else "")
         val controlRunsAtFailure = controlRunningCount
         val retry = Runnable {
             reconnectScheduled = false
             pendingReconnect = null
+            pendingReconnectAt = 0L
             reconnectWaitsForBluetooth = false
             if (menuOpen && generation == restartGeneration) recoveryPendingAfterMenu = true
             if (
@@ -6025,15 +6102,19 @@ class CarPlayHostActivity : ComponentActivity() {
                 appendLog("Not reconnecting after $reason: the same attempt is running again")
                 return@Runnable
             }
-            restartCarPlay("Reconnecting after $reason")
+            checkWirelessWaitTimeout()
+            if (CarPlayBackgroundSession.automaticConnectionTicket() == null) return@Runnable
+            restartCarPlay("Reconnecting after $reason", requireCleanTeardown = creditedFirstTcp)
         }
         pendingReconnect = retry
+        pendingReconnectAt = SystemClock.uptimeMillis() + delayMillis
         reconnectWaitsForBluetooth = englishReason.contains(BluetoothRadioCheck.RADIO_OFF_MARK, true)
         mainHandler.postDelayed(retry, delayMillis)
     }
 
     /** Full-stack fallback when an AirPlay-only reconnect is unavailable. */
-    private fun restartCarPlay(reason: String) {
+    private fun restartCarPlay(reason: String, requireCleanTeardown: Boolean = false) {
+        if (closeManuallyStoppedHost()) return
         if (!CarPlayBackgroundSession.isOwner(this)) return
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress) return
         val size = activeDisplaySize ?: return
@@ -6063,7 +6144,13 @@ class CarPlayHostActivity : ComponentActivity() {
         teardownExecutor.execute {
             val started = System.nanoTime()
             oldController?.close()
-            val completed = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
+            var completed = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
+            // Zero-delay profile retries still serialize with actual resource release. Keep waiting
+            // off the UI thread; cancellation/replacement must never start an overlapping attempt.
+            while (requireCleanTeardown && !completed && !Thread.currentThread().isInterrupted &&
+                !shuttingDown.get() && generation == restartGeneration) {
+                completed = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
+            }
             AsyncDiagnosticLog.append(
                 diagnosticLog,
                 "${CarPlayController.CONNECTION_DIAGNOSTIC_PREFIX} generation=$generation " +
@@ -6072,7 +6159,7 @@ class CarPlayHostActivity : ComponentActivity() {
             )
             oldSink?.let(::closeRetiringSink)
             runOnUiThread {
-                if (!shuttingDown.get() && generation == restartGeneration) {
+                if (!shuttingDown.get() && generation == restartGeneration && (!requireCleanTeardown || completed)) {
                     handshakeResetInProgress = false
                     // The display can rotate again while the old stack is closing. Use the
                     // latest accepted size, and wait for any pending resize to settle first.
@@ -6084,8 +6171,26 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun showDiPlayHome(page: String = "home") {
         releaseCarPlayTouches()
-        OwnScreenStart.start(this, Intent(this, DiPlayActivity::class.java)
-            .putExtra("page", page).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT), ::appendLog)
+        OwnScreenStart.start(this, OwnScreenStart.homeIntent(this, page), ::appendLog)
+    }
+
+    private fun closeManuallyStoppedHost(): Boolean {
+        if (CarPlayBackgroundSession.automaticConnectionTicket() != null) return false
+        if (!isFinishing) {
+            Log.i(TAG, "Closing restored CarPlay screen after manual disconnect")
+            if (OwnScreenStart.start(this, OwnScreenStart.homeIntent(this))) finishAndRemoveTask()
+            else finish() // Keep a legacy management Activity if the launcher refuses the move.
+        }
+        return true
+    }
+
+    private fun finishDisconnectedHost() {
+        if (isFinishing) return
+        if (CarPlayBackgroundSession.automaticConnectionTicket() == null) {
+            // Preserve the management screen even when an older build put it in this task.
+            if (OwnScreenStart.start(this, OwnScreenStart.homeIntent(this))) finishAndRemoveTask()
+            else finish()
+        } else finish() // Internal session replacement must not change navigation semantics.
     }
 
     /** Keep a timed-out sink visible to surface teardown until its codecs have actually been released. */
@@ -6211,7 +6316,6 @@ class CarPlayHostActivity : ComponentActivity() {
         menuWirelessNetworkSignature = null
         settingsMenu?.visibility = View.GONE
         gestureOverlay?.visibility = View.VISIBLE
-        settingsGestureHint?.text = settingsGestureHintText()
         updateDebugOverlays()
         logLines.clear()
         appendLog(
@@ -6259,6 +6363,7 @@ class CarPlayHostActivity : ComponentActivity() {
         releaseSidePanelEffects()
         startupRetryBudget.disconnected()
         restartGeneration += 1
+        mainHandler.removeCallbacks(wirelessWaitTimeout)
         pendingReconnect?.let(mainHandler::removeCallbacks)
         pendingReconnect = null
         reconnectScheduled = false
@@ -6654,7 +6759,6 @@ class CarPlayHostActivity : ComponentActivity() {
         setConnectionStage(getString(stringId), englishResources.getString(stringId))
 
     private fun showConnectionHelp(failure: CarPlayStatus.Failed?) {
-        connectionInstructionsView?.visibility = if (failure == null) View.VISIBLE else View.GONE
         connectionHelpView?.apply {
             visibility = if (failure == null) View.GONE else View.VISIBLE
             if (failure != null) text = getString(ConnectionFailureGuidance.message(failure, wirelessEnabled, wirelessHotspotMode))
@@ -6669,7 +6773,21 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun updateDebugOverlays() {
-        clockOverlay?.update(hostAppearanceResumed && activeScreenStreamTypes.isNotEmpty() && !menuOpen, darkMode)
+        val clockHiddenReason = when {
+            !hostAppearanceResumed -> "host_paused"
+            activeScreenStreamTypes.isEmpty() -> "no_screen_stream"
+            menuOpen -> "menu_open"
+            else -> "visible"
+        }
+        clockOverlay?.update(clockHiddenReason == "visible", darkMode, clockHiddenReason)
+        val clockTheme = (clockHiddenReason == "visible") to darkMode
+        if (clockOverlay != null && lastClockThemeDiagnostic != clockTheme) {
+            lastClockThemeDiagnostic = clockTheme
+            appendLog("THEME_CLOCK visible=${clockTheme.first} hostNight=$darkMode " +
+                "textColor=${if (darkMode) "white" else "black"} " +
+                "sessionId=${activeAirPlaySession?.let { System.identityHashCode(it) }} " +
+                "elapsedMs=${SystemClock.elapsedRealtime()} colorSource=host_decision actualAppearance=unknown")
+        }
         if (!hostAppearanceResumed || activeScreenStreamTypes.isEmpty() || menuOpen) volumeOverlay?.stop()
         statusScrollView?.visibility = View.GONE
         connectionPanel?.visibility = if (activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
@@ -6844,6 +6962,7 @@ class CarPlayHostActivity : ComponentActivity() {
         CarPlayStatus.ControlEnded -> res.getString(R.string.carplay_control_window_ended)
         is CarPlayStatus.Failed -> when (startupFailure) {
             WirelessStartupFailure.HOTSPOT_NOT_READY -> res.getString(R.string.hotspot_network_not_ready)
+            WirelessStartupFailure.AVAILABILITY_TIMEOUT -> res.getString(R.string.waiting_availability_timeout)
             WirelessStartupFailure.FIRST_TCP_TIMEOUT -> res.getString(R.string.first_tcp_timeout)
             WirelessStartupFailure.SESSION_TIMEOUT -> res.getString(R.string.waiting_session_timeout)
             WirelessStartupFailure.FIRST_FRAME_TIMEOUT -> res.getString(R.string.waiting_first_frame_timeout)
@@ -6944,18 +7063,35 @@ internal fun statusBarHiddenByAnotherWindow(display: CarPlaySessionDisplay, widt
 
 /** Process-local hand-off for keeping the CarPlay session alive while no Activity is visible. */
 internal object CarPlayBackgroundSession {
+    val addressPreference = com.shilapi.xcertplay.network.WirelessAddressPreference()
+    @Volatile var wirelessWaitStartedAt: Long? = null
     @Volatile private var automaticConnectionGeneration = 0L
     @Volatile private var automaticConnectionStopped = false
     @Synchronized fun allowAutomaticConnection() {
+        addressPreference.clear()
         automaticConnectionGeneration++
         automaticConnectionStopped = false
+        wirelessWaitStartedAt = null
     }
     @Synchronized fun automaticConnectionTicket(): Long? =
         if (automaticConnectionStopped) null else automaticConnectionGeneration
     @Synchronized fun acceptsAutomaticConnection(ticket: Long): Boolean =
         !automaticConnectionStopped && automaticConnectionGeneration == ticket && !hasSession()
 
+    private val activeObservers = mutableMapOf<Any, () -> Unit>()
+    @Volatile var activeChangedAtUptimeMillis = 0L
+        private set
     @Volatile var active = false
+        set(value) {
+            if (value) wirelessWaitStartedAt = null
+            if (field == value) return
+            field = value
+            activeChangedAtUptimeMillis = SystemClock.uptimeMillis()
+            val observers = synchronized(this) { activeObservers.values.toList() }
+            observers.forEach { it() }
+        }
+    @Synchronized fun observeActive(owner: Any, changed: () -> Unit) { activeObservers[owner] = changed }
+    @Synchronized fun removeActiveObserver(owner: Any) { activeObservers.remove(owner) }
     @Volatile var callPopupReady = false
     /** The running session's hotspot: a host that adopts the session never saw its HotspotReady. */
     @Volatile var hotspotReady: CarPlayStatus.HotspotReady? = null
@@ -6963,6 +7099,7 @@ internal object CarPlayBackgroundSession {
     private var stopping = false
     private var owner: Any? = null
     @Synchronized fun isOwner(candidate: Any): Boolean = owner === candidate
+    @Synchronized fun isStopping(): Boolean = stopping
     @Synchronized fun hasSession(): Boolean = stopAction != null || stopping
     private val stopWaiters = mutableListOf<() -> Unit>()
     private var sessionRevision = 0L
@@ -6984,8 +7121,10 @@ internal object CarPlayBackgroundSession {
         val action: (((() -> Unit)) -> Unit)?
         synchronized(this) {
             if (manual) {
+                addressPreference.clear()
                 automaticConnectionStopped = true
                 automaticConnectionGeneration++
+                wirelessWaitStartedAt = null
             }
             if (stopping) { stopWaiters.add(completion); return }
             action = stopAction

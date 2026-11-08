@@ -8,6 +8,18 @@ internal object HotspotAddressPolicy {
     const val FAMILY_IPV4 = "IPv4"
     const val FAMILY_IPV6 = "IPv6"
 
+    fun select(
+        addresses: List<InetAddress>,
+        preferredFamily: String?,
+        ipv4Only: Boolean,
+        snapshotFallback: InetAddress? = null,
+    ): InetAddress? = if (ipv4Only) {
+        (addresses + listOfNotNull(snapshotFallback)).firstOrNull { it is Inet4Address && usable(it) }
+    } else select(addresses, preferredFamily) ?: snapshotFallback
+
+    fun advertisedAddresses(addresses: List<InetAddress>, ipv4Only: Boolean): List<InetAddress> =
+        if (ipv4Only) addresses.filter { it is Inet4Address && usable(it) } else addresses
+
     fun parseFamily(raw: String?): String? = when (raw) {
         FAMILY_IPV4 -> FAMILY_IPV4
         FAMILY_IPV6 -> FAMILY_IPV6

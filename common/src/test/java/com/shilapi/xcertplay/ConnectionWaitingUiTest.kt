@@ -63,14 +63,11 @@ class ConnectionWaitingUiTest {
         assertTrue(text().contains("认证"))
     }
 
-    @Test fun hotspotAddressAndBandAreShownWithoutClaimingPhoneInternetWorks() {
+    @Test fun networkSummaryOmitsAddressAndBandWithoutClaimingPhoneInternetWorks() {
         report(CarPlayStatus.HotspotReady("BuickPlay", "2.4GHz", 6, "", "192.168.43.1", "manual"))
         assertFalse(text().contains("192.168.43.1"))
         assertFalse(text().contains("2.4GHz"))
-        assertTrue(text().contains("手机互联网：未检测"))
-        screen().detailsToggle.performClick()
-        assertTrue(text().contains("2.4GHz"))
-        assertTrue(text().contains("192.168.43.1"))
+        assertFalse(text().contains("手机互联网"))
     }
 
     @Test fun handshakeSubstageIsVisibleAndDuplicateCallbacksDoNotResetTheProgressClock() {
@@ -80,22 +77,17 @@ class ConnectionWaitingUiTest {
         report(CarPlayStatus.ConnectionProgress(ConnectionMilestone.AIRPLAY_PAIR_VERIFY))
         assertTrue(text(), text().contains("正在处理 CarPlay 配对验证"))
         assertTrue(text(), text().contains("距最近进展：4 秒"))
-        screen().detailsToggle.performClick()
-        assertTrue(text(), text().contains("本次事件记录"))
-        assertTrue(text(), text().contains("iPhone 确认弹窗：无法检测"))
         assertEquals(0, ReflectionHelpers.getField<Int>(activity, "restartGeneration"))
         assertFalse(ReflectionHelpers.getField(activity, "reconnectScheduled"))
     }
 
-    @Test fun elapsedTimeAdvancesAndCompletedStageKeepsItsOwnDuration() {
+    @Test fun elapsedTimeAdvancesInTheSummary() {
         report(CarPlayStatus.ConnectingBluetooth)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
         report(CarPlayStatus.RunningWireless)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
         assertTrue(text(), text().contains("总耗时：5 秒"))
         assertTrue(text(), text().contains("当前阶段：2 秒"))
-        screen().detailsToggle.performClick()
-        assertTrue(text(), text().contains("蓝牙连接：3 秒"))
     }
 
     @Test fun nonRetryableFailureRemainsVisibleAndDoesNotPretendToBeRetrying() {
@@ -144,12 +136,13 @@ class ConnectionWaitingUiTest {
         assertTrue("Landscape sections must sit side by side", b[0] > a[0])
     }
 
-    @Test fun addressesAreExpandedOnDemandWithoutChangingTheController() {
+    @Test fun networkSummaryHasNoExpandableDiagnosticEntry() {
         report(CarPlayStatus.HotspotReady("BuickPlay", "2.4GHz", 6, "", "192.168.43.1", "manual"))
-        assertFalse("The overview must not be dominated by addresses", text().contains("192.168.43.1"))
-        val details = descendants(root).filterIsInstance<TextView>().single { it.text == "连接详情" }
-        details.performClick()
-        assertTrue(text(), text().contains("192.168.43.1"))
+        assertFalse(text(), text().contains("连接详情"))
+        assertFalse(text(), text().contains("192.168.43.1"))
+        assertFalse(text(), text().contains("2.4GHz"))
+        assertTrue(text(), text().contains("网络状态"))
+        assertTrue(text(), text().contains("热点"))
         assertEquals(0, ReflectionHelpers.getField<Int>(activity, "restartGeneration"))
         assertFalse(ReflectionHelpers.getField(activity, "reconnectScheduled"))
     }
@@ -203,12 +196,12 @@ class ConnectionWaitingUiTest {
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     @Config(sdk = [29], qualifiers = "zh-rCN-w600dp-h360dp-mdpi")
-    fun compactLargeFontWaitingScreenKeepsDetailsReadable() = screenshot("compact-zh", 600, 360)
+    fun compactLargeFontWaitingScreenKeepsSummaryReadable() = screenshot("compact-zh", 600, 360)
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     @Config(sdk = [29], qualifiers = "zh-rCN-w1024dp-h600dp-mdpi")
-    fun headUnitLargeFontWaitingScreenKeepsDetailsReadable() = screenshot("headunit-zh", 1024, 600)
+    fun headUnitLargeFontWaitingScreenKeepsSummaryReadable() = screenshot("headunit-zh", 1024, 600)
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -228,7 +221,7 @@ class ConnectionWaitingUiTest {
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     @Config(sdk = [29], qualifiers = "ar-ldrtl-w1024dp-h600dp-mdpi")
-    fun arabicLargeFontWaitingScreenKeepsDetailsReadable() = screenshot("headunit-ar", 1024, 600)
+    fun arabicLargeFontWaitingScreenKeepsSummaryReadable() = screenshot("headunit-ar", 1024, 600)
 
     private fun screenshot(name: String, width: Int, height: Int) {
         val configuration = Configuration(activity.resources.configuration).apply { fontScale = 1.3f }
@@ -270,12 +263,6 @@ class ConnectionWaitingUiTest {
             bitmap.recycle()
         }
         capture("top")
-        screen.detailsToggle.performClick()
-        layoutScreen(width, height)
-        val details = screen.detailsText
-        assertNotNull(details.layout)
-        assertTrue(details.layout.lineCount >= 6)
-        assertEquals(details.text.length, details.layout.getLineEnd(details.layout.lineCount - 1))
         viewport.scrollTo(0, viewport.getChildAt(0).height)
         assertTrue(viewport.scrollY + viewport.height >= viewport.getChildAt(0).height)
         assertTrue(screen.footer.bottom <= height - screen.paddingBottom)

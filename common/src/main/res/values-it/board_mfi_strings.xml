@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_board_mfi">Chip MFi integrato (sperimentale)</string>
+    <string name="settings_board_mfi_description">Usa il chip di autenticazione integrato alla prossima connessione. Nessun ripiego automatico sul software. Seleziona la autenticazione locale per tornare indietro.</string>
+</resources>

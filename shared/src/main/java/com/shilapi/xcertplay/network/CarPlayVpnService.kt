@@ -235,7 +235,7 @@ class CarPlayVpnService : VpnService() {
         additionalServers = servers.drop(1)
         servers.forEach { bound ->
             runCatching { replacement.listener.onDebugLog(
-                "airplay listener ready family=${if (bound.inetAddress is Inet6Address) "IPv6" else "IPv4"} port=${bound.localPort}",
+                "airplay listener ready family=${if (bound.inetAddress is Inet6Address) "IPv6" else "IPv4"} port=${bound.localPort} local=${bound.localSocketAddress}",
             ) }
             Thread(
                 { acceptLoop(generation, bound) },
@@ -273,11 +273,12 @@ class CarPlayVpnService : VpnService() {
                     val internalPeer = isInternalAirPlayPeer(socket.inetAddress, socket.localAddress)
                     current.listenerIdentity?.let { owner ->
                         current.listener.onTcpAccepted(AirPlayTcpAccepted(
-                            owner, internalPeer, acceptedAtNanos,
+                            owner, internalPeer, acceptedAtNanos, socket.inetAddress.hostAddress?.substringBefore('%'),
                         ))
                     }
                     runCatching { current.listener.onDebugLog(
-                        "airplay TCP accepted family=${if (socket.inetAddress is Inet6Address) "IPv6" else "IPv4"}",
+                        "airplay TCP accepted family=${if (socket.inetAddress is Inet6Address) "IPv6" else "IPv4"} " +
+                            "local=${socket.localSocketAddress} peer=${socket.remoteSocketAddress} internalProbe=$internalPeer acceptedAtNs=$acceptedAtNanos",
                     ) }
                     AirPlaySession(
                         socket = socket,
@@ -286,6 +287,7 @@ class CarPlayVpnService : VpnService() {
                         pairings = current.pairings,
                         mfi = current.mfi,
                         listener = object : AirPlaySessionListener by current.listener {
+                            override fun currentAppearanceNight(): Boolean? = current.listener.currentAppearanceNight()
                             // Keep this explicit: stale incremental delegates can otherwise inherit
                             // the interface's empty default for a newly added diagnostic callback.
                             override fun onConnectionMilestone(

@@ -28,8 +28,6 @@
     <string name="waiting_phase_picture">الصورة</string>
     <string name="waiting_steps_title">خطوات الاتصال</string>
     <string name="waiting_network_title">حالة الشبكة</string>
-    <string name="waiting_details_show">تفاصيل الاتصال</string>
-    <string name="waiting_details_hide">إخفاء التفاصيل</string>
     <string name="waiting_current_time">المرحلة الحالية: %1$d ث</string>
     <string name="waiting_total_attempt">الإجمالي: %1$d ث · المحاولة %2$d</string>
     <string name="waiting_duration">%1$.1f ث</string>

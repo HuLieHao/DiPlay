@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_capture_stop">إيقاف الجمع</string>
+    <string name="settings_capture_stop_first">أوقف الجمع قبل حفظ التقرير أو تنزيله.</string>
+    <string name="settings_capture_status">جمع مفصل · %1$d ثانية</string>
+    <string name="settings_capture_hint">يبدأ الجمع عند فتح التطبيق. أعد إنتاج المشكلة ثم أوقف الجمع ونزّل التقرير.</string>
+    <string name="settings_capture_heavy_audio">لقطات الصوت التفصيلية وفحص خيوط التنفيذ</string>
+    <string name="settings_capture_heavy_audio_description">يسري أثناء الجمع. عند التفعيل تُجمع تفريغات خدمات الصوت وتفاصيل خيوط التنفيذ. عند الإيقاف تُتخطى مع الاحتفاظ بأحداث الصوت الأصلية وPCAP والإحصاءات الخفيفة. يُلغى الفحص الجاري ولا تلزم إعادة الاتصال.</string>
+</resources>

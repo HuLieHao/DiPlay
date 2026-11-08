@@ -44,6 +44,7 @@ interface MfiAuthenticator {
 class MfiAuthenticationClient(
     private val transport: I2cTransport,
     val address7Bit: Int,
+    private val diagnostic: (String) -> Unit = {},
 ) : MfiAuthenticator {
     override val certificateType: MfiCertificateType = MfiCertificateType.MFI
 
@@ -78,6 +79,7 @@ class MfiAuthenticationClient(
             offset += count
             register += 1
         }
+        report("mfi certificate_read address=0x${address7Bit.toString(16)} bytes=${certificate.size}")
         certificate
     }
 
@@ -116,7 +118,9 @@ class MfiAuthenticationClient(
         if (length !in 1..MAX_REGISTER_READ_BYTES) {
             throw MfiInvalidDataException("Invalid signature length $length")
         }
-        readRegister(RESPONSE_DATA_REGISTER, length)
+        readRegister(RESPONSE_DATA_REGISTER, length).also {
+            report("mfi signature_read address=0x${address7Bit.toString(16)} bytes=${it.size}")
+        }
     }
 
     private fun bestEffortErrorCode(): Int? = try {
@@ -182,18 +186,28 @@ class MfiAuthenticationClient(
     }
 
     private fun <T> retryIo(operation: String, action: () -> T): T {
+        val started = System.nanoTime()
         val deadlineNanos = deadlineAfter(IO_RETRY_TIMEOUT_MILLIS)
+        var attempts = 0
         var lastFailure: I2cTransportException? = null
         while (true) {
+            attempts++
             try {
-                return action()
+                return action().also {
+                    if (attempts > 1) report("mfi io_recovered operation=$operation attempts=$attempts elapsedMs=${(System.nanoTime() - started) / NANOS_PER_MILLISECOND}")
+                }
             } catch (failure: I2cTransportException) {
                 lastFailure = failure
             }
-            if (System.nanoTime() >= deadlineNanos) throw checkNotNull(lastFailure) { operation }
+            if (System.nanoTime() >= deadlineNanos) {
+                report("mfi io_failed operation=$operation attempts=$attempts elapsedMs=${(System.nanoTime() - started) / NANOS_PER_MILLISECOND} error=${lastFailure?.message}")
+                throw checkNotNull(lastFailure) { operation }
+            }
             sleepMicros(IO_RETRY_DELAY_MICROS)
         }
     }
+
+    private fun report(message: String) { runCatching { diagnostic(message) } }
 
     private fun deadlineAfter(millis: Long): Long {
         val now = System.nanoTime()

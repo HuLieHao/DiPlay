@@ -58,6 +58,8 @@ class SmoothVideoHostLifecycleTest {
         CarPlayBackgroundSession.clear()
         CarPlayBackgroundSession.allowAutomaticConnection()
         activity = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
+        // Isolate window/session tests from OEM lighting service binding.
+        AirPlayPersistence.saveCarPlayNightMode(activity, CarPlayNightMode.DAY)
         AirPlayPersistence.saveAdaptPipResolution(activity, false)
         AirPlayPersistence.saveMfiTarget(activity, MfiTarget.USB_CH341)
         // Host startup without vendor-service workers or real transports.
@@ -376,8 +378,8 @@ class SmoothVideoHostLifecycleTest {
     private fun retiringSinks(): Set<AndroidMediaSink> = (getField("retiringSinks") as Set<AndroidMediaSink>).toSet()
 
     private fun restartCarPlay(reason: String) {
-        activity.javaClass.getDeclaredMethod("restartCarPlay", String::class.java)
-            .apply { isAccessible = true }.invoke(activity, reason)
+        activity.javaClass.getDeclaredMethod("restartCarPlay", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }.invoke(activity, reason, false)
     }
 
     private fun shutdown(reason: String) {

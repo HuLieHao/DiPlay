@@ -77,6 +77,72 @@ class MfiTargetSettingsTest {
         assertEquals(MfiTarget.REMOTE, AirPlayPersistence.loadMfiTarget(activity))
     }
 
+    @Test fun boardMfiCanBeSelectedAndReturnedToSoftware() {
+        org.robolectric.shadows.ShadowBuild.setModel("FF_5000")
+        activity.applicationInfo.flags = activity.applicationInfo.flags or android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE
+        renderConnection()
+        targetButton().performClick()
+        var dialog = ShadowAlertDialog.getLatestAlertDialog()
+        assertEquals(3, dialog.listView.adapter.count)
+        dialog.listView.performItemClick(null, 2, 2)
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+        assertEquals(MfiTarget.LOCAL, AirPlayPersistence.loadMfiTarget(activity))
+        targetButton().performClick()
+        dialog = ShadowAlertDialog.getLatestAlertDialog()
+        dialog.listView.performItemClick(null, 2, 2)
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(MfiTarget.I2C, AirPlayPersistence.loadMfiTarget(activity))
+        assertEquals("/dev/i2c-2", AirPlayPersistence.loadMfiI2cPath(activity))
+        renderConnection()
+        targetButton().performClick()
+        dialog = ShadowAlertDialog.getLatestAlertDialog()
+        dialog.listView.performItemClick(null, 0, 0)
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(MfiTarget.LOCAL, AirPlayPersistence.loadMfiTarget(activity))
+    }
+
+    @Test fun releaseBuildDoesNotOfferBoardMfiButSavedI2cCanBeReverted() {
+        org.robolectric.shadows.ShadowBuild.setModel("FF_5000")
+        activity.applicationInfo.flags = activity.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE.inv()
+        renderConnection()
+        targetButton().performClick()
+        assertEquals(2, ShadowAlertDialog.getLatestAlertDialog().listView.adapter.count)
+        ShadowAlertDialog.getLatestAlertDialog().dismiss()
+        AirPlayPersistence.saveMfiTarget(activity, MfiTarget.I2C)
+        renderConnection()
+        targetButton().performClick()
+        val dialog = ShadowAlertDialog.getLatestAlertDialog()
+        dialog.listView.performItemClick(null, 0, 0)
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(MfiTarget.LOCAL, AirPlayPersistence.loadMfiTarget(activity))
+    }
+
+    @Test fun boardSelectionKeepsActiveSessionUntilExplicitReconnect() {
+        org.robolectric.shadows.ShadowBuild.setModel("FF_5000")
+        activity.applicationInfo.flags = activity.applicationInfo.flags or android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE
+        val session = org.mockito.Mockito.mock(com.shilapi.xcertplay.orchestration.CarPlayController::class.java)
+        var stops = 0
+        CarPlayBackgroundSession.store(session, org.mockito.Mockito.mock(com.shilapi.xcertplay.media.AndroidMediaSink::class.java), 800, 480, Any(),
+            CarPlaySessionDisplay(800, 480, android.view.Surface.ROTATION_0, false, false, 800, 480)) { stops++ }
+        CarPlayBackgroundSession.active = true
+        PendingReconnect.clear()
+        renderConnection()
+        targetButton().performClick()
+        val dialog = ShadowAlertDialog.getLatestAlertDialog()
+        assertEquals(activity.getString(R.string.save), dialog.getButton(AlertDialog.BUTTON_POSITIVE).text.toString())
+        dialog.listView.performItemClick(null, 2, 2)
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(MfiTarget.I2C, AirPlayPersistence.loadMfiTarget(activity))
+        assertTrue(PendingReconnect.isPending(session))
+        assertEquals(0, stops)
+        org.junit.Assert.assertSame(session, CarPlayBackgroundSession.snapshot()?.controller)
+        PendingReconnect.clear()
+    }
+
     private fun renderConnection() {
         ReflectionHelpers.setField(activity, "page", "settings")
         ReflectionHelpers.setField(activity, "settingsCategory", SettingsCategory.CONNECTION)

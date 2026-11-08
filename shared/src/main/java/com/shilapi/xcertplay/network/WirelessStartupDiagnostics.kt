@@ -17,14 +17,20 @@ internal class WirelessStartupDiagnostics(
 ) : Closeable {
     private val closed = AtomicBoolean(false)
     private val startedNanos = nowNs()
+    private var authenticatedAtNs: Long? = null
+    private var firstWifiConfigNs: Long? = null
+    private var firstTcpAfterWifiConfigMs: Long? = null
     private var authenticated = false
     private var wifiConfigs = 0
     private var startRequests = 0
     private var tcpAccepted = 0
     private var sessionActive = false
+    private var sessionActiveAtNs: Long? = null
+    private var firstFrameAtNs: Long? = null
     private var firstStartRequestNs: Long? = null
     private var firstTcpAfterStartMs: Long? = null
-    @Volatile private var lastSnapshot = ""
+    private data class Snapshot(val text: String, val startNs: Long, val endNs: Long)
+    @Volatile private var lastSnapshot: Snapshot? = null
     private val worker = Thread(::observe, "diplay-wireless-diagnostics").apply { isDaemon = true }
 
     init { require(intervalMillis > 0) }
@@ -35,9 +41,15 @@ internal class WirelessStartupDiagnostics(
 
     @Synchronized fun controlProgress(message: String) {
         when (message) {
-            "iap2 authentication accepted" -> authenticated = true
+            "iap2 authentication accepted" -> {
+                authenticated = true
+                if (authenticatedAtNs == null) authenticatedAtNs = nowNs()
+            }
             "iap2 tx=0x5703 accessory-wifi-configuration",
-            "iap2 tx=0x5703 post-transport accessory-wifi-configuration" -> wifiConfigs++
+            "iap2 tx=0x5703 post-transport accessory-wifi-configuration" -> {
+                wifiConfigs++
+                if (firstWifiConfigNs == null) firstWifiConfigNs = nowNs()
+            }
             "iap2 tx=0x4301 carplay-start-session" -> {
                 startRequests++
                 if (firstStartRequestNs == null) firstStartRequestNs = nowNs()
@@ -47,15 +59,26 @@ internal class WirelessStartupDiagnostics(
 
     @Synchronized fun connectionAccepted() {
         tcpAccepted++
+        if (firstTcpAfterWifiConfigMs == null) {
+            firstWifiConfigNs?.let { firstTcpAfterWifiConfigMs = elapsedMillis(it) }
+        }
         if (firstTcpAfterStartMs == null) {
             firstStartRequestNs?.let { firstTcpAfterStartMs = elapsedMillis(it) }
         }
     }
-    @Synchronized fun sessionActive() { sessionActive = true }
+    @Synchronized fun sessionActive() {
+        sessionActive = true
+        if (sessionActiveAtNs == null) sessionActiveAtNs = nowNs()
+    }
+
+    @Synchronized fun frameRendered() {
+        if (firstFrameAtNs == null) firstFrameAtNs = nowNs()
+    }
 
     @Synchronized fun summary(): String {
         val waitingFor = when {
-            sessionActive -> "none"
+            firstFrameAtNs != null -> "none"
+            sessionActive -> "first_rendered_frame"
             tcpAccepted > 0 -> "AirPlay_protocol"
             startRequests > 0 -> "WiFi_discovery_or_AirPlay_TCP"
             authenticated -> "WiFi_configuration_or_start_request"
@@ -65,7 +88,14 @@ internal class WirelessStartupDiagnostics(
             "authenticated=$authenticated wifiConfigs=$wifiConfigs startRequests=$startRequests " +
             "tcpAccepted=$tcpAccepted sessionActive=$sessionActive waitingFor=$waitingFor " +
             "startRequestAgeMs=${firstStartRequestNs?.let(::elapsedMillis) ?: "none"} " +
-            "firstTcpAfterStartMs=${firstTcpAfterStartMs ?: "none"}"
+            "firstTcpAfterStartMs=${firstTcpAfterStartMs ?: "none"} " +
+            "authenticatedAtMs=${authenticatedAtNs?.let { (it - startedNanos).coerceAtLeast(0) / 1_000_000 } ?: "none"} " +
+            "firstWifiConfigAtMs=${firstWifiConfigNs?.let { (it - startedNanos).coerceAtLeast(0) / 1_000_000 } ?: "none"} " +
+            "firstTcpAfterWifiConfigMs=${firstTcpAfterWifiConfigMs ?: "none"} " +
+            "sessionActiveAtMs=${sessionActiveAtNs?.let { (it - startedNanos).coerceAtLeast(0) / 1_000_000 } ?: "none"} " +
+            "firstFrameAtMs=${firstFrameAtNs?.let { (it - startedNanos).coerceAtLeast(0) / 1_000_000 } ?: "none"} " +
+            "firstFrameAfterSessionMs=${firstFrameAtNs?.let { frame -> sessionActiveAtNs?.let { (frame - it).coerceAtLeast(0) / 1_000_000 } } ?: "none"} " +
+            "timingOrigin=after_hotspot_address_selection"
     }
 
     private fun elapsedMillis(since: Long): Long = (nowNs() - since).coerceAtLeast(0) / 1_000_000
@@ -73,13 +103,15 @@ internal class WirelessStartupDiagnostics(
     private fun observe() {
         try {
             while (!closed.get()) {
+                val captureStart = nowNs()
                 val snapshot = try { sample() } catch (error: Exception) {
                     "sampling=unavailable failureClass=${error.javaClass.simpleName}"
                 }
                 if (closed.get()) return
-                lastSnapshot = snapshot
+                val capture = Snapshot(snapshot, captureStart, nowNs())
+                lastSnapshot = capture
                 emit(summary())
-                emitSnapshot(snapshot)
+                emitSnapshot(capture)
                 Thread.sleep(intervalMillis)
             }
         } catch (_: InterruptedException) {
@@ -94,12 +126,21 @@ internal class WirelessStartupDiagnostics(
         emitSnapshot(lastSnapshot, cached = true)
     }
 
-    private fun emitSnapshot(snapshot: String, cached: Boolean = false) {
-        // The report redactor caps each log line at 700 characters. Never append the kernel
-        // counters to the already detailed startup/interface/P2P/Bonjour state line.
-        snapshot.lineSequence().filter { it.isNotBlank() }.take(4).forEach { line ->
-            emit("wireless snapshot${if (cached) " cached=true" else ""} $line")
+    private fun emitSnapshot(snapshot: Snapshot?, cached: Boolean = false) {
+        if (snapshot == null) {
+            emit("wireless snapshot available=false reason=no_completed_capture")
+            return
         }
+        emit("wireless capture captureStartAtMs=${(snapshot.startNs - startedNanos).coerceAtLeast(0) / 1_000_000} " +
+            "captureEndAtMs=${(snapshot.endNs - startedNanos).coerceAtLeast(0) / 1_000_000} " +
+            "captureDurationMs=${(snapshot.endNs - snapshot.startNs).coerceAtLeast(0) / 1_000_000} " +
+            "cached=$cached observationWindow=true not_atomic=true")
+        // Keep each source separate for the legacy mirror and retain the original in the archive.
+        val lines = snapshot.text.lineSequence().filter { it.isNotBlank() }.toList()
+        lines.take(32).forEach { line ->
+            emit("wireless snapshot${if (cached) " cached=true ageMs=${elapsedMillis(snapshot.startNs)}" else ""} $line")
+        }
+        if (lines.size > 32) emit("wireless snapshot truncated=true omittedLines=${lines.size - 32}")
     }
 
     private fun emit(message: String) {
@@ -109,7 +150,7 @@ internal class WirelessStartupDiagnostics(
     }
 }
 
-/** Counts are useful in exported reports; literals, hardware identifiers and names are not. */
+/** Read-only interface evidence; address counts remain available for summary consumers. */
 internal object WirelessInterfaceDiagnostics {
     fun snapshot(interfaceName: String?): String {
         if (interfaceName == null) return "interfaceState=unknown"
@@ -117,7 +158,9 @@ internal object WirelessInterfaceDiagnostics {
             val network = NetworkInterface.getByName(interfaceName)
                 ?: return "interfaceState=missing"
             "interfaceState=${if (network.isUp) "up" else "down"} multicast=${network.supportsMulticast()} " +
-                addressSummary(Collections.list(network.inetAddresses))
+                addressSummary(Collections.list(network.inetAddresses)) +
+                " iface=$interfaceName mtu=${network.mtu} addresses=" +
+                network.interfaceAddresses.joinToString(",") { "${it.address.hostAddress}/${it.networkPrefixLength}" }
         } catch (error: Exception) {
             "interfaceState=unavailable failureClass=${error.javaClass.simpleName}"
         }

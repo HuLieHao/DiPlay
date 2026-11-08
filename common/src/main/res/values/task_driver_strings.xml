@@ -2,10 +2,8 @@
     <string name="task_connection_management">Connection management</string>
     <string name="task_carplay">CarPlay</string>
     <string name="settings_clock">System clock</string>
-    <string name="settings_clock_off">Off</string>
-    <string name="settings_clock_left">Bottom left</string>
-    <string name="settings_clock_right">Bottom right</string>
     <string name="settings_clock_size">Clock text size</string>
-    <string name="settings_clock_description">Uses the head unit’s system time, not the iPhone clock. Changes apply when returning to CarPlay. Insets leave room for the dock; verify placement while parked.</string>
+    <string name="settings_clock_description">Fixed at the bottom left using system time. Transparent background, black text by day and white at night, following CarPlay day/night. Changes apply when returning to CarPlay; no reconnection needed.</string>
     <string name="settings_clock_unknown">Time unknown —</string>
+    <string name="disconnecting_carplay">Disconnecting CarPlay…</string>
 </resources>

@@ -15,6 +15,29 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [27], manifest = Config.NONE)
 class WirelessStartupListenerTest {
+    @Test fun supersededFirstFrameCannotCompleteOrCloseNewDiagnostics() {
+        Fixture().use { f ->
+            f.connected()
+            val session = f.session()
+            f.listener.onSessionActive(session)
+            session.javaClass.getDeclaredField("mainScreenToken").apply { isAccessible = true }.set(session, Any())
+            val newerLogs = mutableListOf<String>()
+            val newer = com.shilapi.xcertplay.network.WirelessStartupDiagnostics({ "" }, newerLogs::add)
+            f.onWatchdogLog = { message ->
+                if (message.contains("first frame rendered")) {
+                    (f.controller.javaClass.getDeclaredField("wirelessGeneration").apply { isAccessible = true }
+                        .get(f.controller) as java.util.concurrent.atomic.AtomicInteger).incrementAndGet()
+                    f.controller.javaClass.getDeclaredField("wirelessDiagnostics").apply { isAccessible = true }.set(f.controller, newer)
+                }
+            }
+            f.listener.onVideoFrameRendered(session)
+            assertFalse(newerLogs.toString(), newerLogs.any { it.contains("observation=ended") })
+            assertTrue(newer.summary(), newer.summary().contains("firstFrameAtMs=none"))
+            assertEquals(0, f.renderedPictures)
+            newer.close()
+        }
+    }
+
     @Test fun staleWirelessRunRetainsDiagnosticsWithoutForwardingOrdinaryLogs() {
         Fixture().use { f ->
             (f.controller.javaClass.getDeclaredField("wirelessGeneration").apply { isAccessible = true }
@@ -59,6 +82,7 @@ class WirelessStartupListenerTest {
     /** Exercises real controller listeners: diagnostic and auxiliary callbacks must not bypass startup protection. */
     private class Fixture : AutoCloseable {
         val logs = mutableListOf<String>()
+        val observedPeers = mutableListOf<String>()
         var renderedPictures = 0
         val config = AirPlayConfig("test", "test", "", "1", AirPlayDisplayConfig(800, 480))
         val identity = AirPlayIdentity.generate()
@@ -76,17 +100,18 @@ class WirelessStartupListenerTest {
         var timer: (() -> Unit)? = null
         var cancelled = 0
         val failures = mutableListOf<WirelessStartupFailure>()
+        var onWatchdogLog: ((String) -> Unit)? = null
         val watchdog = WirelessStartupWatchdog(owner, { _, action ->
             timer = action; { cancelled++ }
-        }, failures::add, log = logs::add)
+        }, failures::add, log = { logs.add(it); onWatchdogLog?.invoke(it) })
         val listener: AirPlaySessionListener
         val sessions = mutableListOf<AirPlaySession>()
         init {
             val phase = controller.javaClass.getDeclaredField("phase").apply { isAccessible = true }
             phase.set(controller, phase.type.enumConstants.first { it.toString() == "WIRELESS" })
             listener = controller.javaClass.getDeclaredMethod("wirelessSessionListener", Int::class.javaPrimitiveType,
-                WirelessStartupWatchdog::class.java).apply { isAccessible = true }
-                .invoke(controller, 0, watchdog) as AirPlaySessionListener
+                WirelessStartupWatchdog::class.java, kotlin.jvm.functions.Function1::class.java).apply { isAccessible = true }
+                .invoke(controller, 0, watchdog, { peer: String -> observedPeers.add(peer); Unit }) as AirPlaySessionListener
         }
         fun session() = AirPlaySession(Socket(), config, identity, PairingStore(), null, listener, media)
             .also { sessions += it }
@@ -130,11 +155,50 @@ class WirelessStartupListenerTest {
         }
     }
 
-    @Test fun internalAndForeignTcpDoNotArmStartupDeadline() {
-        Fixture().use { f ->
-            f.listener.onTcpAccepted(AirPlayTcpAccepted(f.owner, true, 0))
-            f.listener.onTcpAccepted(AirPlayTcpAccepted(AirPlayListenerIdentity(0), false, 0))
-            assertNull(f.timer)
+    @Test fun verifiedProfileSuppressesTimeoutFamilyFlipWhileGenericDevicesRetainIt() {
+        for (profile in listOf(true, false)) Fixture().use { f ->
+            val prefs = RuntimeEnvironment.getApplication().getSharedPreferences("flip-$profile", 0)
+            prefs.edit().putString("successful_environment", "car").putString("successful_family", "IPv4").commit()
+            fun set(name: String, value: Any) = f.controller.javaClass.getDeclaredField(name)
+                .apply { isAccessible = true }.set(f.controller, value)
+            val state = f.controller.javaClass.getDeclaredField("addressPreference").apply { isAccessible = true }
+                .get(f.controller) as com.shilapi.xcertplay.network.WirelessAddressPreference
+            set("fastWireless", profile)
+            set("wirelessAddressAttempt", state.begin("car", prefs))
+            set("wirelessPublishedAddress", java.net.InetAddress.getByName("192.168.43.1"))
+            var samples = 0
+            set("wirelessAddressRecovery", com.shilapi.xcertplay.network.HotspotAddressRecovery(
+                sample = {
+                    samples++
+                    listOf(java.net.Inet6Address.getByAddress(null,
+                        java.net.InetAddress.getByName("fe80::1").address, 1))
+                }, cancelled = { false }, pause = {}))
+            f.controller.javaClass.getDeclaredMethod("flipWirelessAddressFamily", Int::class.javaPrimitiveType)
+                .apply { isAccessible = true }.invoke(f.controller, 0)
+            assertEquals(if (profile) 0 else 1, samples)
+            assertEquals(if (profile) "IPv4" else "IPv6", state.begin("car", prefs).family)
+            assertEquals("Timeout cannot overwrite successful evidence", "IPv4", prefs.getString("successful_family", null))
         }
     }
+
+    @Test fun internalAndForeignTcpDoNotArmStartupDeadline() {
+        Fixture().use { f ->
+            f.listener.onTcpAccepted(AirPlayTcpAccepted(f.owner, true, 0, "127.0.0.1"))
+            f.listener.onTcpAccepted(AirPlayTcpAccepted(AirPlayListenerIdentity(0), false, 0, "192.168.1.99"))
+            assertNull(f.timer)
+            assertTrue(f.observedPeers.isEmpty())
+        }
+    }
+    @Test fun onlyCurrentAcceptedPeerReachesRouteEvidenceCallback() {
+        Fixture().use { f ->
+            f.listener.onTcpAccepted(AirPlayTcpAccepted(f.owner, false, 0, "192.168.1.2"))
+            f.listener.onTcpAccepted(AirPlayTcpAccepted(f.owner, false, 1, "fe80::2"))
+            assertEquals(listOf("192.168.1.2", "fe80::2"), f.observedPeers)
+            (f.controller.javaClass.getDeclaredField("wirelessGeneration").apply { isAccessible = true }
+                .get(f.controller) as java.util.concurrent.atomic.AtomicInteger).incrementAndGet()
+            f.listener.onTcpAccepted(AirPlayTcpAccepted(f.owner, false, 2, "192.168.1.3"))
+            assertEquals("A superseded listener must not update target identity", listOf("192.168.1.2", "fe80::2"), f.observedPeers)
+        }
+    }
+
 }

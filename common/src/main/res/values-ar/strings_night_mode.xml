@@ -17,7 +17,12 @@
     <string name="carplay_night_end">نهاية الوضع الليلي</string>
     <string name="carplay_night_schedule_hint">يستخدم التوقيت المحلي لوحدة السيارة. يجب أن يختلف وقت البداية والنهاية، ويمكن أن تمتد الفترة عبر منتصف الليل.</string>
     <string name="carplay_night_schedule_same_time">يجب أن يختلف وقت البداية والنهاية.</string>
-    <string name="carplay_night_hint">احفظ ثم عد إلى CarPlay للتطبيق.</string>
+    <string name="carplay_night_hint">اختر المظهر التلقائي في CarPlay. ارجع إلى CarPlay للتطبيق دون إعادة الاتصال.</string>
     <string name="carplay_night_ambient_hint">يستخدم العتبة والتأخير أدناه. ويتبع Android عند غياب مستشعر الضوء.</string>
-    <string name="carplay_night_time_note">عند اختيار المظهر التلقائي في إعدادات CarPlay، يراعي CarPlay وقت iPhone أيضًا. حتى إذا اخترت نهار دائمًا، فقد يظهر CarPlay بمظهر داكن ليلًا.</string>
+    <string name="carplay_night_time_note">يتحكم تطبيق الخرائط في ألوان الخريطة.</string>
+    <string name="carplay_night_vehicle">اتباع أضواء السيارة</string>
+    <string name="carplay_night_vehicle_hint">يقرأ حالة أضواء السيارة دون root. حتى استلام حالة صالحة، يعتبر الأضواء مطفأة (الوضع النهاري). لا يُفعّل الوضع الليلي إلا عند تأكيد تشغيل الأضواء.</string>
+    <string name="carplay_night_vehicle_fallback">حالة الأضواء غير معروفة · الوضع النهاري</string>
+    <string name="carplay_night_no_result">لا توجد نتيجة؛ افتح CarPlay لقراءة الإشارة.</string>
+    <string name="carplay_night_last_result">آخر قرار للجهاز: %1$s · %2$s</string>
 </resources>

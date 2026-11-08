@@ -23,6 +23,11 @@ class ConnectionFailureGuidanceTest {
             assertEquals(R.string.connection_help_general, guide("AirPlay TCP timeout", startup = reason))
         }
     }
+    @Test fun availabilityTimeoutAsksForPhoneConsentRatherThanWifiChanges() {
+        assertEquals(R.string.connection_help_availability,
+            guide("iAP2 authentication succeeded; no CarPlay availability", startup = WirelessStartupFailure.AVAILABILITY_TIMEOUT))
+    }
+
     @Test fun typedFailuresHavePriorityOverMessages() {
         assertEquals(R.string.connection_help_reset_wifi,
             guide("unknown", reset = true, startup = WirelessStartupFailure.FIRST_TCP_TIMEOUT))
@@ -74,24 +79,20 @@ class ConnectionFailureGuidanceTest {
         assertFalse(app.getString(R.string.connection_help_permissions).contains("Trust"))
     }
 
-    @Test fun recoveryMessageReplacesSetupTipAndClearsOnNextStage() {
+    @Test fun recoveryMessageRemainsVisibleAndClearsOnNextStage() {
         val activity = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
         try {
-            val normal = TextView(activity).apply { visibility = View.VISIBLE }
             val help = TextView(activity).apply { visibility = View.GONE }
-            for ((field, value) in listOf("connectionInstructionsView" to normal, "connectionHelpView" to help)) {
-                activity.javaClass.getDeclaredField(field).apply { isAccessible = true }.set(activity, value)
-            }
+            activity.javaClass.getDeclaredField("connectionHelpView")
+                .apply { isAccessible = true }.set(activity, help)
             val method = activity.javaClass.getDeclaredMethod("showConnectionHelp", CarPlayStatus.Failed::class.java)
                 .apply { isAccessible = true }
             method.invoke(activity, CarPlayStatus.Failed("USB permission was denied"))
-            assertEquals(View.GONE, normal.visibility)
             assertEquals(View.VISIBLE, help.visibility)
             assertEquals(activity.getString(R.string.connection_help_permissions), help.text.toString())
             assertTrue(help.text.isNotEmpty())
 
             method.invoke(activity, null)
-            assertEquals(View.VISIBLE, normal.visibility)
             assertEquals(View.GONE, help.visibility)
         } finally {
             for (field in listOf("teardownExecutor", "airPlayCommandExecutor")) {

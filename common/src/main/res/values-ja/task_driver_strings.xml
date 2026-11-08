@@ -2,10 +2,8 @@
     <string name="task_connection_management">接続管理</string>
     <string name="task_carplay">CarPlay</string>
     <string name="settings_clock">システム時計</string>
-    <string name="settings_clock_off">オフ</string>
-    <string name="settings_clock_left">左下</string>
-    <string name="settings_clock_right">右下</string>
     <string name="settings_clock_size">時計の文字サイズ</string>
-    <string name="settings_clock_description">iPhone ではなく車載機のシステム時刻を使用します。CarPlay に戻ると変更が反映されます。Dock の空間を確保しています。停車中に位置を確認してください。</string>
+    <string name="settings_clock_description">左下に固定し、システム時刻を表示します。背景は透明で、CarPlay の昼夜設定に従い、昼は黒文字、夜は白文字になります。CarPlay に戻ると反映され、再接続は不要です。</string>
     <string name="settings_clock_unknown">時刻不明 —</string>
+    <string name="disconnecting_carplay">CarPlay を切断中…</string>
 </resources>

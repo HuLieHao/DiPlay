@@ -10,6 +10,7 @@ class NavigationWheelKeyPolicyTest {
         assertEquals(3, route(false, null))
         assertEquals(5, route(true, 5))
         assertEquals(14, route(true, 14))
+        assertEquals(11, route(true, 11))
         assertNull(route(true, null))
         assertNull(route(true, 3))
         assertNull(route(false, null, priority = true))

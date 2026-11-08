@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_board_mfi">板載 MFi 晶片（實驗性）</string>
+    <string name="settings_board_mfi_description">使用車機板載認證晶片，下次連線生效；失敗時不會自動回退軟體認證。可選擇本機軟體認證切回。</string>
+</resources>

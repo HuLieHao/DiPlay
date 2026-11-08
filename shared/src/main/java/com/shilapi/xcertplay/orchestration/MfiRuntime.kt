@@ -24,7 +24,7 @@ class MfiSession(
 
 /** Runs the documented address probe and wraps the first responding MFi coprocessor. */
 object MfiRuntime {
-    fun scan(transport: I2cTransport): MfiAuthenticationClient {
+    fun scan(transport: I2cTransport, diagnostic: (String) -> Unit = {}): MfiAuthenticationClient {
         val discovery = MfiDeviceScanner(
             transport = transport,
             probeTimeoutMillis = MFI_STARTUP_PROBE_TIMEOUT_MILLIS,
@@ -34,7 +34,7 @@ object MfiRuntime {
                 "No MFi authentication coprocessor responded: " +
                     discovery.failures.joinToString { "0x${it.address7Bit.toString(16)}=${it.error}" },
             )
-        return MfiAuthenticationClient(transport, chip.address7Bit)
+        return MfiAuthenticationClient(transport, chip.address7Bit, diagnostic)
     }
 
     private const val MFI_STARTUP_PROBE_TIMEOUT_MILLIS = 15_000L

@@ -38,25 +38,42 @@ internal class MediaClockTrim(
     private var lastSampleNs = 0L
     private var lastBuffered = 0L
     private var lastUpdateNs: Long? = null
+    private var lastIntegrationNs: Long? = null
     private var compressedBacklog = false
 
     /** The playback rate last asked of the track, in Hz. */
     var rate = sampleRate
         private set
 
-    /** Include compressed packets waiting for decode: those frames are already queued audio. */
+    /** A rebuffer pause is not continuous playback and must not contribute clock drift. */
+    fun restartSampling() {
+        level = null
+        lastUpdateNs = null
+        lastIntegrationNs = null
+    }
+
+    /** Include compressed packets waiting for decode, but exclude decoder congestion from clock control. */
     fun sample(queuedFrames: Long, nowNs: Long, compressedFrames: Long = 0L) {
         if (targetFrames <= 0L) return
+        sampleDtNs = if (level == null) 0L else nowNs - lastSampleNs
         // Decoder backpressure is not evidence that the head unit's clock runs at a different
         // rate; do not teach the *next* music stream an artificial clock correction.
+        val wasCompressedBacklog = compressedBacklog
         compressedBacklog = compressedFrames > targetFrames
+        if (wasCompressedBacklog != compressedBacklog) {
+            // Neither a decoder stall nor its catch-up burst is a continuous clock sample.
+            // Recover from neutral error, then average continuous playback again: the first
+            // decoder output can be a large peak. Keep the rate-update throttle independent,
+            // since AAC packets can cross this boundary on consecutive writes.
+            level = if (compressedBacklog) null else 0.0
+            lastIntegrationNs = null
+        }
         val buffered = queuedFrames.coerceAtLeast(0L) +
             compressedFrames.coerceIn(0L, sampleRate.toLong() * 16L)
         sampledPcm = queuedFrames
         sampledCompressed = compressedFrames
-        sampleDtNs = if (level == null) 0L else nowNs - lastSampleNs
         val previous = level
-        val elapsedNs = nowNs - lastSampleNs
+        val elapsedNs = if (wasCompressedBacklog && !compressedBacklog) 0L else nowNs - lastSampleNs
         // After a pause, a rebuffer or the first write the average restarts from what is queued now.
         level = if (previous == null || elapsedNs > STALE_NS) error(buffered.toDouble())
         else {
@@ -87,13 +104,20 @@ internal class MediaClockTrim(
         val previousUpdate = lastUpdateNs
         if (previousUpdate != null && nowNs - previousUpdate < UPDATE_NS) return null
         // A pause between updates is not drift: integrate at most one normal step over it.
-        val seconds = if (previousUpdate == null) 0.0 else ((nowNs - previousUpdate) / 1e9).coerceAtMost(MAX_STEP_SECONDS)
+        val previousIntegration = lastIntegrationNs
+        val seconds = if (previousIntegration == null) 0.0
+            else ((nowNs - previousIntegration) / 1e9).coerceAtMost(MAX_STEP_SECONDS)
         lastUpdateNs = nowNs
+        lastIntegrationNs = if (compressedBacklog) null else nowNs
         if (!compressedBacklog) {
             integral = (integral + KI * error * seconds).coerceIn(-MAX_TRIM, MAX_TRIM)
             learnedTrim = integral
         }
-        val next = (sampleRate * (1.0 + (KP * error + integral).coerceIn(-MAX_TRIM, MAX_TRIM))).roundToInt()
+        // A compressed backlog can persist even while PCM is nearly empty. Its size describes
+        // decoder throughput, not hardware drift: proportional correction must be excluded too.
+        // Retain the learned hardware correction instead of accelerating to drain the decoder.
+        val proportional = if (compressedBacklog) 0.0 else KP * error
+        val next = (sampleRate * (1.0 + (proportional + integral).coerceIn(-MAX_TRIM, MAX_TRIM))).roundToInt()
         if (next == rate) return null
         rate = next
         return next

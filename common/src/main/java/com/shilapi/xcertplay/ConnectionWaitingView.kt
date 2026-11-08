@@ -36,7 +36,6 @@ internal class ConnectionWaitingView(
         gravity = Gravity.END
     }
     val totalTime = label(16f)
-    val gestureHint = label(13f)
     val bodyScroll = ScrollView(context).apply { isFillViewport = false }
     val stepsCard = column()
     val networkCard = column()
@@ -44,8 +43,6 @@ internal class ConnectionWaitingView(
     val retryButton = action(R.string.retry_carplay_connection, onRetry).apply { visibility = View.GONE }
     val recoveryButton = action(R.string.reset_carplay_wi_fi, onRecovery).apply { visibility = View.GONE }
     val backButton = action(R.string.back_to_diplay, onBack)
-    val detailsToggle = action(R.string.waiting_details_show) { toggleDetails() }
-    val detailsText = label(14f)
 
     private val brand = label(18f, true).apply { text = context.getString(R.string.app_name) }
     private val icon = ImageView(context).apply { setImageResource(R.drawable.ic_carplay) }
@@ -57,7 +54,6 @@ internal class ConnectionWaitingView(
     private val hotspot = label(16f)
     private val latestProgress = label(14f)
     private val tcp = label(16f)
-    private val internet = label(14f).apply { text = context.getString(R.string.waiting_internet_unknown) }
     private val error = label(14f).apply {
         maxLines = 3
         ellipsize = TextUtils.TruncateAt.END
@@ -65,12 +61,9 @@ internal class ConnectionWaitingView(
         visibility = View.GONE
     }
     val help = label(14f).apply { visibility = View.GONE }
-    val instructions = label(13f)
-    private val detailsGroup = column().apply { visibility = View.GONE }
     private var palette = DiPlayPalette.LIGHT
     private var progress: ConnectionWaitingProgress? = null
     private var wireless = true
-    private var expanded = false
     private var wide: Boolean? = null
     private var compact: Boolean? = null
     private val rows = WaitingPhase.entries.mapIndexed { index, phase -> PhaseRow(index, phase) }
@@ -91,13 +84,9 @@ internal class ConnectionWaitingView(
 
         stepsCard.addView(stepHeading, LayoutParams(-1, -2).apply { bottomMargin = dp(SMALL_GAP) })
         rows.forEach { stepsCard.addView(it.view, LayoutParams(-1, -2)) }
-        for (view in listOf(networkHeading, hotspot, tcp, latestProgress, internet, error, help, detailsToggle)) {
+        for (view in listOf(networkHeading, hotspot, tcp, latestProgress, error, help)) {
             networkCard.addView(view, LayoutParams(-1, -2).apply { bottomMargin = dp(SMALL_GAP) })
         }
-        detailsGroup.addView(detailsText)
-        detailsGroup.addView(instructions, LayoutParams(-1, -2).apply { topMargin = dp(GAP) })
-        detailsGroup.addView(gestureHint, LayoutParams(-1, -2).apply { topMargin = dp(SMALL_GAP) })
-        networkCard.addView(detailsGroup)
         sections.addView(stepsCard)
         sections.addView(networkCard)
         bodyScroll.addView(sections, FrameLayout.LayoutParams(-1, -2))
@@ -186,9 +175,6 @@ internal class ConnectionWaitingView(
         tcp.setTextColor(if (state.tcpAccepted) palette.success else palette.secondaryText)
         error.visibility = if (state.failure == null) View.GONE else View.VISIBLE
         state.failure?.let { error.show(context.getString(R.string.waiting_last_error, it)) }
-        if (expanded) detailsText.show(progress.text(resources, wireless))
-        instructions.show(context.getString(if (wireless) R.string.keep_your_iphone_nearby_with_bluetooth_and_wi_fi_on_allow
-            else R.string.use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an))
     }
 
     fun applyPalette(colors: DiPlayPalette) {
@@ -200,20 +186,12 @@ internal class ConnectionWaitingView(
         }
         for (text in listOf(brand, stage, stepHeading, networkHeading, hotspot)) text.setTextColor(colors.primaryText)
         currentTime.setTextColor(colors.accent)
-        for (text in listOf(totalTime, latestProgress, internet, help, instructions, gestureHint, detailsText)) text.setTextColor(colors.secondaryText)
+        for (text in listOf(totalTime, latestProgress, help)) text.setTextColor(colors.secondaryText)
         error.setTextColor(colors.warning)
         backButton.style(DiPlayButtonKind.SECONDARY, colors, overlay = false)
         retryButton.style(DiPlayButtonKind.PRIMARY, colors, overlay = false)
         recoveryButton.style(DiPlayButtonKind.PRIMARY, colors, overlay = false)
-        detailsToggle.style(DiPlayButtonKind.SECONDARY, colors, overlay = false)
         rows.forEach { it.last = null }
-        progress?.let { update(it, wireless) }
-    }
-
-    private fun toggleDetails() {
-        expanded = !expanded
-        detailsGroup.visibility = if (expanded) View.VISIBLE else View.GONE
-        detailsToggle.text = context.getString(if (expanded) R.string.waiting_details_hide else R.string.waiting_details_show)
         progress?.let { update(it, wireless) }
     }
 

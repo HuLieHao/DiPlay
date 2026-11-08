@@ -114,6 +114,21 @@ class AdaptiveSettingsUiTest {
         context.getSharedPreferences("xcertplay_airplay", 0).edit().clear().commit()
     }
 
+    @Test fun heavyAudioCaptureComparisonLivesInDiagnosticsAndPersistsImmediately() {
+        context.getSharedPreferences("startup-capture", 0).edit().clear().commit()
+        val screen = openSettings()
+        ReflectionHelpers.callInstanceMethod<Unit>(screen, "openSettingsCategory",
+            ReflectionHelpers.ClassParameter(SettingsCategory::class.java, SettingsCategory.DIAGNOSTICS))
+        val setting = descendants(screen.window.decorView).filterIsInstance<Switch>()
+            .single { it.contentDescription == "Heavy audio snapshots and thread scans" }
+        assertTrue(setting.isChecked)
+        setting.isChecked = false
+        assertFalse(StartupCapture.heavyAudioSnapshots(context))
+        setting.isChecked = true
+        assertTrue(StartupCapture.heavyAudioSnapshots(context))
+        context.getSharedPreferences("startup-capture", 0).edit().clear().commit()
+    }
+
     @Test fun compactSettingsOpenOnAnEverydayDriverOverview() {
         val screen = openSettings()
 
@@ -588,7 +603,12 @@ class AdaptiveSettingsUiTest {
         assertTrue(buttons.size >= 4)
         buttons.forEach { button ->
             val lp = button.layoutParams as LinearLayout.LayoutParams
-            assertEquals(button.text.toString(), dp(60), lp.height)
+            if (button.text.startsWith(screen.getString(R.string.carplay_night_mode) + " · ")) {
+                assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, lp.height)
+                assertEquals(dp(60), button.minimumHeight)
+            } else {
+                assertEquals(button.text.toString(), dp(60), lp.height)
+            }
             assertEquals(button.text.toString(), 0, lp.topMargin)
             assertTrue(button.text.toString(), lp.bottomMargin in setOf(0, dp(6), dp(12)))
         }

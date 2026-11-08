@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_capture_stop">Остановить сбор</string>
+    <string name="settings_capture_stop_first">Остановите сбор перед сохранением или загрузкой отчёта.</string>
+    <string name="settings_capture_status">Подробный сбор · %1$d секунд</string>
+    <string name="settings_capture_hint">Сбор начинается при открытии приложения. Воспроизведите проблему, остановите сбор и скачайте отчёт.</string>
+    <string name="settings_capture_heavy_audio">Подробные снимки аудио и сканирование потоков</string>
+    <string name="settings_capture_heavy_audio_description">Применяется во время сбора. Включено: дампы аудиослужб и сведения о потоках. Выключено: они пропускаются, но сохраняются исходные аудиособытия, PCAP и краткая статистика. Текущая проверка отменяется; переподключение не требуется.</string>
+</resources>

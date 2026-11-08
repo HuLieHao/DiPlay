@@ -38,6 +38,7 @@ class WirelessPermissionRefusalTest {
         // A session another test left behind would be adopted instead of asking for permissions.
         CarPlayBackgroundSession.clear()
         context.getSharedPreferences("xcertplay_airplay", 0).edit().clear().commit()
+        AirPlayPersistence.saveCarPlayNightMode(context, CarPlayNightMode.DAY)
         AirPlayPersistence.saveWirelessEnabled(context, true)
         AirPlayPersistence.saveWirelessHotspotMode(context, WirelessHotspotMode.WIFI_P2P)
         // Not the built-in identity, which needs the private assets of a real build.

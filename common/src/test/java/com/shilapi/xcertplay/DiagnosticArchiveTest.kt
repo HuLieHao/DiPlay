@@ -6,6 +6,52 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DiagnosticArchiveTest {
+    @Test fun repeatedClockJumpsRetainMonotonicEvidenceAndSessionListValidity() {
+        val root = Files.createTempDirectory("clock-jumps").toFile()
+        try {
+            var wall = 1_800_000_000_000L
+            var mono = 100L
+            val archive = DiagnosticArchive(root, wall = { wall }, monotonic = { mono }, reserve = 0)
+            val id = archive.start("clock evidence")
+            wall = 1_174_100_000_000L; mono = 1100L
+            archive.append(id, "first rollback")
+            assertTrue(archive.sessions().single().second.contains("clockValid=false"))
+            wall += 1000; mono += 1000
+            archive.append(id, "ordinary invalid date")
+            wall = 1_800_000_003_000L; mono += 1000
+            archive.append(id, "recovery jump")
+            val jumps = root.resolve("archive/$id.summary").readLines().filter { it.startsWith("clock_jump") }
+            assertEquals(2, jumps.size)
+            assertTrue(jumps[0].contains("previousMonotonicMs=100"))
+            assertTrue(jumps[0].contains("wallDeltaMs=-625900000000"))
+            assertTrue(jumps[0].contains("monotonicDeltaMs=1000"))
+            assertTrue(jumps[1].contains("dateSelectionUnreliable=true"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun cleanupOfThousandsOfRunsDoesNotRescanDirectoryForEveryMetadataFile() {
+        val root = Files.createTempDirectory("large-archive").toFile()
+        try {
+            val directory = root.resolve("archive").apply { mkdirs() }
+            directory.resolve("legacy-migrated").writeText("done")
+            val ids = (1..2000).map { java.util.UUID.randomUUID().toString() }
+            ids.forEach { id ->
+                directory.resolve("$id.meta").writeText("session=$id wallMs=1800000000000 clockValid=true")
+                directory.resolve("$id-test-000000.log").writeText("original evidence")
+            }
+            val archive = DiagnosticArchive(root, wall = { 1_800_000_001_000L }, reserve = 0)
+            val started = System.nanoTime()
+            archive.start("new connection")
+            val elapsed = (System.nanoTime() - started) / 1_000_000
+            println("large archive cleanup elapsedMs=$elapsed")
+            assertTrue("4000 retained files must not stall the writer: ${elapsed}ms", elapsed < 3000)
+            ids.forEach { id ->
+                assertTrue(directory.resolve("$id.meta").isFile)
+                assertEquals("original evidence", directory.resolve("$id-test-000000.log").readText())
+            }
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun pendingHeaderRetriesAnIncompleteInitialWrite() {
         val root = Files.createTempDirectory("partial-header-retry").toFile()
         try {

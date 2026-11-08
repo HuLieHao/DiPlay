@@ -17,7 +17,12 @@
     <string name="carplay_night_end">Fine notte</string>
     <string name="carplay_night_schedule_hint">Usa l’ora locale della head unit. Imposta orari di inizio e fine diversi; sono supportati intervalli che superano la mezzanotte.</string>
     <string name="carplay_night_schedule_same_time">Gli orari di inizio e fine devono essere diversi.</string>
-    <string name="carplay_night_hint">Salva e torna a CarPlay per applicare.</string>
+    <string name="carplay_night_hint">Seleziona aspetto automatico in CarPlay. Torna a CarPlay per applicare senza riconnettere.</string>
     <string name="carplay_night_ambient_hint">Usa la soglia e il ritardo qui sotto. Senza un sensore di luce, segue Android.</string>
-    <string name="carplay_night_time_note">Quando l’aspetto è impostato su Automatico nelle impostazioni di CarPlay, CarPlay considera anche l’ora dell’iPhone. Anche se selezioni Sempre giorno, CarPlay potrebbe comunque apparire scuro di notte.</string>
+    <string name="carplay_night_time_note">I colori della mappa dipendono dalla relativa app.</string>
+    <string name="carplay_night_vehicle">Segui luci del veicolo</string>
+    <string name="carplay_night_vehicle_hint">Legge le luci del veicolo senza root. Finché non riceve uno stato valido, le considera spente (giorno). Solo un segnale di accensione attiva la modalità notte.</string>
+    <string name="carplay_night_vehicle_fallback">Stato luci sconosciuto · modalità giorno</string>
+    <string name="carplay_night_no_result">Nessun risultato; apri CarPlay per leggere il segnale.</string>
+    <string name="carplay_night_last_result">Ultima decisione del dispositivo: %1$s · %2$s</string>
 </resources>

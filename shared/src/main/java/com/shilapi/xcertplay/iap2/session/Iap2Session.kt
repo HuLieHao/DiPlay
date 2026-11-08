@@ -122,7 +122,7 @@ class Iap2Session private constructor(
             onTrace: (String) -> Unit = {},
             onArtwork: (Iap2ArtworkTransfer) -> Unit = {},
         ): Iap2Session =
-            Iap2Session(Iap2CsmChannel.open(underlying, onArtwork), traceContext, onTrace)
+            Iap2Session(Iap2CsmChannel.open(underlying, onArtwork, { onTrace("[$traceContext] $it") }), traceContext, onTrace)
 
         fun openWireless(
             underlying: BlockingDuplexByteStream,
@@ -130,7 +130,7 @@ class Iap2Session private constructor(
             onTrace: (String) -> Unit = {},
             onArtwork: (Iap2ArtworkTransfer) -> Unit = {},
         ): Iap2Session =
-            Iap2Session(Iap2CsmChannel.openWireless(underlying, onArtwork), traceContext, onTrace)
+            Iap2Session(Iap2CsmChannel.openWireless(underlying, onArtwork, { onTrace("[$traceContext] $it") }), traceContext, onTrace)
 
         fun openTunnel(
             underlying: BlockingDuplexByteStream,
@@ -138,7 +138,7 @@ class Iap2Session private constructor(
             onTrace: (String) -> Unit = {},
             onArtwork: (Iap2ArtworkTransfer) -> Unit = {},
         ): Iap2Session =
-            Iap2Session(Iap2CsmChannel.openTunnel(underlying, onArtwork), traceContext, onTrace)
+            Iap2Session(Iap2CsmChannel.openTunnel(underlying, onArtwork, { onTrace("[$traceContext] $it") }), traceContext, onTrace)
 
         fun wrap(
             channel: Iap2CsmChannel,

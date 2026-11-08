@@ -96,6 +96,30 @@ class AudioClockTrimTest {
         assertEquals(listOf(47_280), RateTrack.rates)
     }
 
+    @Test fun aShortRebufferRestartsClockObservationWithoutLearningThePause() {
+        // code67 recovered after 312 ms with sampleAge=676 ms, below the stale timeout.
+        // A resumed track must not extrapolate continuous draining through that pause.
+        for (recoveries in listOf(1, 6)) {
+            val trim = MediaClockTrim(48_000, 14_400, 0.008)
+            val now = System.nanoTime()
+            trim.sample(7_200, now - 676_000_000L)
+            trim.rateDue(now - 676_000_000L)
+            set("clockTrim", trim)
+            set("rebufferCount", recoveries)
+            set("rebufferRecoverReportCount", recoveries - 1)
+            set("playbackStarted", false)
+            type.getDeclaredMethod("startPlayback", AudioTrack::class.java)
+                .apply { isAccessible = true }.invoke(renderer, track)
+            trim.sample(14_400, now)
+            assertEquals("recovery $recoveries must discard the pre-pause error",
+                0.0, trim.snapshot(now).filteredError!!, 0.0)
+            assertEquals(0L, trim.snapshot(now).sampleDtNs)
+            assertEquals(48_384, trim.rateDue(now))
+            assertEquals("the paused interval is not drift", 0.008,
+                trim.snapshot(now).integral, 0.0)
+        }
+    }
+
     @Test fun nothingIsTrimmedBeforeMusicPlays() {
         set("playbackStarted", false)
         write(2_048)

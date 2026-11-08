@@ -2,10 +2,8 @@
     <string name="task_connection_management">Gestión de conexión</string>
     <string name="task_carplay">CarPlay</string>
     <string name="settings_clock">Reloj del sistema</string>
-    <string name="settings_clock_off">Desactivado</string>
-    <string name="settings_clock_left">Abajo a la izquierda</string>
-    <string name="settings_clock_right">Abajo a la derecha</string>
     <string name="settings_clock_size">Tamaño del reloj</string>
-    <string name="settings_clock_description">Usa la hora del sistema del coche, no la del iPhone. Los cambios se aplican al volver a CarPlay. Se deja espacio para el Dock; comprueba la posición con el coche aparcado.</string>
+    <string name="settings_clock_description">Fijo abajo a la izquierda con la hora del sistema. Fondo transparente, texto negro de día y blanco de noche, siguiendo el día/noche de CarPlay. Los cambios se aplican al volver a CarPlay, sin reconectar.</string>
     <string name="settings_clock_unknown">Hora desconocida —</string>
+    <string name="disconnecting_carplay">Desconectando CarPlay…</string>
 </resources>

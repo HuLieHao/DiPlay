@@ -17,7 +17,12 @@
     <string name="carplay_night_end">Конец ночного режима</string>
     <string name="carplay_night_schedule_hint">Используется местное время головного устройства. Время начала и конца должно различаться; период может переходить через полночь.</string>
     <string name="carplay_night_schedule_same_time">Время начала и конца должно различаться.</string>
-    <string name="carplay_night_hint">Сохраните и вернитесь в CarPlay.</string>
+    <string name="carplay_night_hint">Выберите автоматическое оформление в CarPlay. Вернитесь в CarPlay для применения без переподключения.</string>
     <string name="carplay_night_ambient_hint">Используются порог и задержка ниже. Без датчика света используются настройки Android.</string>
-    <string name="carplay_night_time_note">Если в настройках оформления внутри CarPlay выбран автоматический режим, CarPlay также учитывает время iPhone. Даже если выбран режим «Всегда дневной», ночью CarPlay может отображаться в тёмном оформлении.</string>
+    <string name="carplay_night_time_note">Цвета карты определяет приложение навигации.</string>
+    <string name="carplay_night_vehicle">По освещению автомобиля</string>
+    <string name="carplay_night_vehicle_hint">Читает состояние освещения без root. Пока не получено допустимое состояние, свет считается выключенным (дневной режим). Ночной режим включается только при подтверждении включения света.</string>
+    <string name="carplay_night_vehicle_fallback">Состояние света неизвестно · дневной режим</string>
+    <string name="carplay_night_no_result">Результата нет; откройте CarPlay для чтения сигнала.</string>
+    <string name="carplay_night_last_result">Последнее решение устройства: %1$s · %2$s</string>
 </resources>
